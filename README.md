@@ -10,6 +10,9 @@ This repository contains an unofficial implementation of the research paper [Ana
 
 
 ## Usage
+```
+accelerate launch train.py
+```
 
 ## Requirements
 
