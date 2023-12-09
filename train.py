@@ -110,10 +110,7 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
         for step, batch in enumerate(train_dataloader):
             images = batch["images"]
 
-            noise = torch.randn_like(images) + config.noise_offset * torch.randn(
-                        (images.shape[0], images.shape[1], 1, 1), device=images.device
-                    )
-
+            noise = torch.randn_like(images)
             # Add noise to the clean images according to the noise magnitude at each timestep
             sigma = get_sigma(images.shape[0], P_mean, P_std, images.device)
             noisy_images = add_noise(images, noise, sigma)
@@ -153,7 +150,7 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
                 if config.use_ema:
                     ema.store(model.parameters())
                     ema.copy_to(model.parameters())
-                    pipeline = DDIMPipeline(unet=accelerator.unwrap_model(model), scheduler=noise_scheduler)
+                    pipeline = KarrasPipeline(unet=accelerator.unwrap_model(model), scheduler=noise_scheduler)
                     pipeline.save_pretrained(os.path.join(config.output_dir, f"ema_checkpoints_{epoch+1}"))
                     ema.restore(model.parameters())
 

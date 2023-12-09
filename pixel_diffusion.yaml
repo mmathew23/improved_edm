@@ -1,17 +1,15 @@
 model_name: "texture_diffusion"
 image_size: 64
-snr_gamma: 0.0 
 use_ema: False
-noise_offset: 0.1
-train_batch_size: 64
+train_batch_size: 32
 val_batch_size: 16
 num_epochs: 100
 gradient_accumulation_steps: 1
-learning_rate: 0.005
+learning_rate: 0.01
 save_image_epochs: 10
 save_model_epochs: 20
 mixed_precision: "fp16"  # `no` for float32, `fp16` for automatic mixed precision
-output_dir: "results/butterflies_karras_pipeline_cosinelr_005_lossw"
+output_dir: "results/butterflies"
 overwrite_output_dir: true  # overwrite the old model when re-running the notebook
 seed: 24357234501
 training:
@@ -23,26 +21,24 @@ unet:
   sample_size: ${image_size}
   in_channels: 3
   out_channels: 3
-  layers_per_block: 2
-  block_out_channels: [64, 128, 256, 512]
+  layers_per_block: 3
+  block_out_channels: [128, 128, 256, 512]
   down_block_types: ["DownBlock2D", "DownBlock2D", "AttnDownBlock2D", "DownBlock2D"]
-  up_block_types: ["UpBlock2D", "AttnUpBlock2D", "UpBlock2D", "UpBlock2D"]
+  up_block_types: ["UpBlock2D", "UpBlock2D", "AttnUpBlock2D", "UpBlock2D"]
   dropout: 0.0
   add_attention: True
 noise_scheduler:
   _target_: "diffusers.DDIMScheduler"
   num_train_timesteps: 1000
   beta_schedule: "linear"
-  # use_karras_sigmas: True
 optimizer:
   _target_: "torch.optim.Adam"
   lr: ${learning_rate}
+  betas: [.9, .99]
 lr_scheduler:
   name: 'cosine'
-  # name: 'inverse_sqrt'
-  # num_warmup_steps: 500
-  # t_ref: 1000
-  num_cycles: .48
+  num_warmup_steps: 500
+  num_cycles: 0.45
 data:
   dataset:
     path: 'ceyda/smithsonian_butterflies'
