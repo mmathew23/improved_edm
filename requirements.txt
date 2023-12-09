@@ -8,3 +8,4 @@ omegaconf==2.3.0
 torch==2.1.0
 torchvision==0.15.0
 tqdm==4.64.1
+xformers==0.0.22.post7
