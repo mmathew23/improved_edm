@@ -5,7 +5,7 @@ train_batch_size: 32
 val_batch_size: 16
 num_epochs: 100
 gradient_accumulation_steps: 1
-learning_rate: 0.01
+learning_rate: 0.005
 save_image_epochs: 10
 save_model_epochs: 20
 mixed_precision: "fp16"  # `no` for float32, `fp16` for automatic mixed precision
@@ -24,7 +24,7 @@ unet:
   layers_per_block: 3
   block_out_channels: [128, 128, 256, 512]
   down_block_types: ["DownBlock2D", "DownBlock2D", "AttnDownBlock2D", "DownBlock2D"]
-  up_block_types: ["UpBlock2D", "UpBlock2D", "AttnUpBlock2D", "UpBlock2D"]
+  up_block_types: ["UpBlock2D", "AttnUpBlock2D", "UpBlock2D", "UpBlock2D"]
   dropout: 0.0
   add_attention: True
 noise_scheduler:

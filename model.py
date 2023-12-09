@@ -1031,6 +1031,17 @@ def recursive_he_uniform_init(module: nn.Module, a: float = -1.0, b: float = 1.0
             recursive_he_uniform_init(child, a=a, b=b)
 
 
+def recursive_normal_init(module: nn.Module, mean: float = 0.0, std: float = 1.0):
+    for name, child in module.named_children():
+        if isinstance(child, (nn.Conv2d, nn.Linear)):
+            nn.init.normal_(child.weight, mean=mean, std=std)
+            if child.bias is not None:
+                print('There is a bias')
+                nn.init.constant_(child.bias, 0.0)
+        else:
+            recursive_normal_init(child, mean=mean, std=std)
+
+
 class UNet2DModel(ModelMixin, ConfigMixin):
     r"""
     A 2D UNet model that takes a noisy sample and a timestep and returns a sample shaped output.
@@ -1206,8 +1217,8 @@ class UNet2DModel(ModelMixin, ConfigMixin):
         # out
         self.conv_out = Conv2d(block_out_channels[0], out_channels, kernel_size=3, padding=1, bias=False)
 
-        # init weights to uniform
-        recursive_he_uniform_init(self)
+        # init weights to normal since weight normalization
+        recursive_normal_init(self)
         self.gain = nn.Parameter(torch.ones(1, 1, 1, 1))
 
     def forward(
