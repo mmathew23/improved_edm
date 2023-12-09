@@ -3,7 +3,7 @@ image_size: 64
 snr_gamma: 0.0 
 use_ema: False
 noise_offset: 0.1
-train_batch_size: 32
+train_batch_size: 64
 val_batch_size: 16
 num_epochs: 100
 gradient_accumulation_steps: 1
@@ -11,7 +11,7 @@ learning_rate: 0.005
 save_image_epochs: 10
 save_model_epochs: 20
 mixed_precision: "fp16"  # `no` for float32, `fp16` for automatic mixed precision
-output_dir: "results/butterflies_karras_pipeline"
+output_dir: "results/butterflies_karras_pipeline_cosinelr_005_lossw"
 overwrite_output_dir: true  # overwrite the old model when re-running the notebook
 seed: 24357234501
 training:
@@ -38,7 +38,11 @@ optimizer:
   _target_: "torch.optim.Adam"
   lr: ${learning_rate}
 lr_scheduler:
-  num_warmup_steps: 500
+  name: 'cosine'
+  # name: 'inverse_sqrt'
+  # num_warmup_steps: 500
+  # t_ref: 1000
+  num_cycles: .48
 data:
   dataset:
     path: 'ceyda/smithsonian_butterflies'

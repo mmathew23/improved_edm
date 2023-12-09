@@ -22,14 +22,6 @@ else:
 
 # Mostly adapted from the diffusers library, thanks HuggingFace!
 
-
-# num_timestep_embeddings = 100
-# timestep_proj = GaussianFourierProjection(embedding_size=block_out_channels[0], scale=0.25, log=True, flip_sin_to_cos=True)
-# timestep_emb = TimestepEmbedding(in_channels=block_out_channels[0]*2, embedding_size=num_timestep_embeddings)
-# emb = timestep_emb(timestep_proj(alpha))
-# need post act or does it happen in resblock?
-# A: happens in resblock
-
 # Taken from paper
 def weight_normalize(x, eps=1e-4):
     dim = list(range(1, x.ndim))
@@ -151,17 +143,9 @@ class TimestepEmbedding(nn.Module):
         linear_cls = Linear
 
         self.linear_1 = linear_cls(in_channels, time_embed_dim, bias=False)
-        # self.linear_2 = linear_cls(time_embed_dim, time_embed_dim, bias=False)
-
-        # self.act = nn.SiLU()
-
 
     def forward(self, sample):
         sample = self.linear_1(sample)
-        # sample = self.linear_2(self.act(sample))
-
-        # if self.post_act is not None:
-        #     sample = self.post_act(sample)
         return sample
 
 
@@ -202,7 +186,6 @@ class ClassEmbedding(nn.Module):
         class_embed = self.class_embedding(class_idx) / np.sqrt(self.num_classes)
         return self.linear(class_embed)
 
-# add both fourierembeddings and class embeddings
 
 class Upsample2D(nn.Module):
     """A 2D upsampling layer with an optional convolution.
@@ -463,137 +446,7 @@ class ResnetBlock2D(nn.Module):
         hidden_states = self.conv2(hidden_states)
 
         output_tensor = (input_tensor + hidden_states) / self.output_scale_factor
-
-        return output_tensor
-
-
-class ResnetBlock2Dold(nn.Module):
-    r"""
-    A Resnet block.
-
-    Parameters:
-        in_channels (`int`): The number of channels in the input.
-        out_channels (`int`, *optional*, default to be `None`):
-            The number of output channels for the first conv2d layer. If None, same as `in_channels`.
-        dropout (`float`, *optional*, defaults to `0.0`): The dropout probability to use.
-        temb_channels (`int`, *optional*, default to `512`): the number of channels in timestep embedding.
-        eps (`float`, *optional*, defaults to `1e-6`): The epsilon to use for the normalization.
-        output_scale_factor (`float`, *optional*, default to be `1.0`): the scale factor to use for the output.
-        use_in_shortcut (`bool`, *optional*, default to `True`):
-            If `True`, add a 1x1 nn.conv2d layer for skip-connection.
-        up (`bool`, *optional*, default to `False`): If `True`, add an upsample layer.
-        down (`bool`, *optional*, default to `False`): If `True`, add a downsample layer.
-        conv_shortcut_bias (`bool`, *optional*, default to `True`):  If `True`, adds a learnable bias to the
-            `conv_shortcut` output.
-        conv_2d_out_channels (`int`, *optional*, default to `None`): the number of channels in the output.
-            If None, same as `out_channels`.
-    """
-
-    def __init__(
-        self,
-        *,
-        in_channels: int,
-        out_channels: Optional[int] = None,
-        dropout: float = 0.0,
-        temb_channels: int = 512,
-        eps: float = 1e-6,
-        output_scale_factor: float = 1.0,
-        use_in_shortcut: Optional[bool] = None,
-        up: bool = False,
-        down: bool = False,
-        conv_2d_out_channels: Optional[int] = None,
-        type: str = 'down', # or 'up'
-    ):
-        super().__init__()
-        self.in_channels = in_channels
-        out_channels = in_channels if out_channels is None else out_channels
-        self.out_channels = out_channels
-        self.up = up
-        self.down = down
-        self.output_scale_factor = output_scale_factor
-
-        linear_cls = Linear
-        conv_cls = Conv2d
-
-        self.conv1 = conv_cls(in_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
-
-        if temb_channels is not None:
-            self.time_emb_proj = linear_cls(temb_channels, out_channels, bias=False)
-
-        self.dropout = torch.nn.Dropout(dropout)
-        conv_2d_out_channels = conv_2d_out_channels or out_channels
-        self.conv2 = conv_cls(out_channels, conv_2d_out_channels, kernel_size=3, stride=1, padding=1, bias=False)
-
-        self.nonlinearity = nn.SiLU()
-
-        self.upsample = self.downsample = None
-        if self.up:
-            self.upsample = Upsample2D(in_channels, use_conv=True)
-        elif self.down:
-            self.downsample = Downsample2D(in_channels, use_conv=True, padding=1)
-
-        self.use_in_shortcut = self.in_channels != conv_2d_out_channels if use_in_shortcut is None else use_in_shortcut
-
-        self.conv_shortcut = None
-        if self.use_in_shortcut:
-            self.conv_shortcut = conv_cls(
-                in_channels,
-                conv_2d_out_channels,
-                kernel_size=1,
-                stride=1,
-                padding=0,
-                bias=False,
-            )
-
-    def forward(
-        self,
-        input_tensor: torch.FloatTensor,
-        temb: torch.FloatTensor,
-        scale: float = 1.0,
-    ) -> torch.FloatTensor:
-        hidden_states = input_tensor
-        hidden_states = self.nonlinearity(hidden_states)
-
-        if self.upsample is not None:
-            # upsample_nearest_nhwc fails with large batch sizes. see https://github.com/huggingface/diffusers/issues/984
-            if hidden_states.shape[0] >= 64:
-                input_tensor = input_tensor.contiguous()
-                hidden_states = hidden_states.contiguous()
-            input_tensor = (
-                self.upsample(input_tensor, scale=scale)
-            )
-            hidden_states = (
-                self.upsample(hidden_states, scale=scale)
-            )
-        elif self.downsample is not None:
-            input_tensor = (
-                self.downsample(input_tensor, scale=scale)
-            )
-            hidden_states = (
-                self.downsample(hidden_states, scale=scale)
-            )
-
-        hidden_states = self.conv1(hidden_states)
-
-        if self.time_emb_proj is not None:
-            temb = self.nonlinearity(temb)
-            temb = (
-                self.time_emb_proj(temb)[:, :, None, None]
-            )
-
-        hidden_states = hidden_states * (1+temb)
-
-        hidden_states = self.nonlinearity(hidden_states)
-
-        hidden_states = self.dropout(hidden_states)
-        hidden_states = self.conv2(hidden_states)
-
-        if self.conv_shortcut is not None:
-            input_tensor = (
-                self.conv_shortcut(input_tensor)
-            )
-
-        output_tensor = (input_tensor + hidden_states) / self.output_scale_factor
+        output_tensor.clamp(-256, 256)
 
         return output_tensor
 
@@ -861,6 +714,7 @@ class AttnDownBlock2D(nn.Module):
             cross_attention_kwargs.update({"scale": lora_scale})
             hidden_states = resnet(hidden_states, temb, scale=lora_scale)
             hidden_states = attn(hidden_states, **cross_attention_kwargs)
+            hidden_states.clamp(-256, 256)
             output_states = output_states + (hidden_states,)
         
         if self.downsampler is not None:
@@ -1043,6 +897,7 @@ class AttnUpBlock2D(nn.Module):
             hidden_states = resnet(hidden_states, temb, scale=scale)
             cross_attention_kwargs = {"scale": scale}
             hidden_states = attn(hidden_states, **cross_attention_kwargs)
+            hidden_states.clamp(-256, 256)
 
         if self.upsampler is not None:
             hidden_states = self.upsampler(hidden_states, temb=temb, scale=scale)
@@ -1259,6 +1114,9 @@ class UNet2DModel(ModelMixin, ConfigMixin):
         self.time_proj = GaussianFourierProjection(embedding_size=block_out_channels[0], scale=0.25)
         timestep_input_dim = 2 * block_out_channels[0]
         self.time_embedding = TimestepEmbedding(timestep_input_dim, time_embed_dim)
+
+        # loss weighting 
+        self.loss_mlp = nn.Sequential(GaussianFourierProjection(embedding_size=block_out_channels[0], scale=0.25), Linear(timestep_input_dim, 1, bias=False))
 
         # class embedding
         if num_class_embeds is not None:

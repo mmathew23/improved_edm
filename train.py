@@ -55,6 +55,14 @@ def add_noise(sample, noise, sigma):
     return sample+noise
 
 
+def replace_grad_nans(model):
+    # Iterate through all parameters
+    for name, param in model.named_parameters():
+        if param.requires_grad and param.grad is not None:
+            # Replace nan, inf, -inf in gradients with 0
+            param.grad = torch.where(~torch.isfinite(param.grad), torch.zeros_like(param.grad), param.grad)
+
+
 def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_scheduler):
 
     if config.use_ema:
@@ -112,12 +120,14 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
             loss_w = get_sigma_weight(sigma, sigma_data) 
 
             with accelerator.accumulate(model):
-                # Predict the noise residual
+                # Predict the noise
                 pred = model(noisy_images, sigma[:, 0, 0, 0], return_dict=False)[0]
 
-                # loss = (F.mse_loss(pred, images, reduction="none")*loss_w).mean()
-                loss = F.mse_loss(pred, images)
+                u_sigma = model.loss_mlp(sigma[:, 0, 0, 0])[:, :, None, None]
+                loss = F.mse_loss(pred, images, reduction="none")
+                loss = (loss_w * loss / u_sigma.exp() + u_sigma).mean()
                 accelerator.backward(loss)
+                replace_grad_nans(model)
                 if accelerator.sync_gradients:
                     accelerator.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
