@@ -1,6 +1,7 @@
 # Analyzing and Improving the Training Dynamics of Diffusion Models
 
 ## Overview
+**WIP**
 This repository contains an unofficial implementation of the research paper [Analyzing and Improving the Training Dynamics of Diffusion Models](https://arxiv.org/abs/2312.02696v1) authored by Tero Karras, Janne Hellsten, Miika Aittala, Timo Aila, Jaakko Lehtinen, and Samuli Laine from NVIDIA and NVIDIA Aalto University. The paper focuses on addressing challenges in the training of the ADM diffusion model architecture, specifically targeting uncontrolled magnitude changes and imbalances in network activations and weights during training. This repo is a sample implementation of the paper using pixel-based diffusion and not latent diffusion.
 
 ## Key Contributions
