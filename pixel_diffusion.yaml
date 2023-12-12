@@ -1,13 +1,13 @@
-model_name: "texture_diffusion"
+model_name: "improved_edm"
 image_size: 64
 use_ema: False
-train_batch_size: 32
+train_batch_size: 64
 val_batch_size: 16
-num_epochs: 100
-gradient_accumulation_steps: 1
-learning_rate: 0.005
-save_image_epochs: 10
-save_model_epochs: 20
+num_epochs: 1000
+gradient_accumulation_steps: 2
+learning_rate: 0.01
+save_image_epochs: 50
+save_model_epochs: 50
 mixed_precision: "fp16"  # `no` for float32, `fp16` for automatic mixed precision
 output_dir: "results/butterflies"
 overwrite_output_dir: true  # overwrite the old model when re-running the notebook
@@ -22,9 +22,9 @@ unet:
   in_channels: 3
   out_channels: 3
   layers_per_block: 3
-  block_out_channels: [128, 128, 256, 512]
-  down_block_types: ["DownBlock2D", "DownBlock2D", "AttnDownBlock2D", "DownBlock2D"]
-  up_block_types: ["UpBlock2D", "AttnUpBlock2D", "UpBlock2D", "UpBlock2D"]
+  block_out_channels: [64, 128, 128, 128]
+  down_block_types: ["DownBlock2D", "DownBlock2D", "AttnDownBlock2D", "AttnDownBlock2D"]
+  up_block_types: ["AttnUpBlock2D", "AttnUpBlock2D", "UpBlock2D", "UpBlock2D"]
   dropout: 0.0
   add_attention: True
 noise_scheduler:
@@ -36,13 +36,21 @@ optimizer:
   lr: ${learning_rate}
   betas: [.9, .99]
 lr_scheduler:
-  name: 'cosine'
+  name: 'inverse_sqrt'
   num_warmup_steps: 500
-  num_cycles: 0.45
+  t_ref: 1000
 data:
   dataset:
     path: 'ceyda/smithsonian_butterflies'
     split: 'train'
+    map:
+      obj:
+        _target_: 'torchvision.transforms.Resize'
+        size: 
+          - ${image_size}
+          - ${image_size}
+      from_key: 'image'
+      to_key: 'image'
   dataloader:
     num_workers: 8
     batch_size: ${train_batch_size}
