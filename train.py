@@ -8,7 +8,7 @@ import hydra
 from omegaconf import DictConfig
 from hydra.core.hydra_config import HydraConfig
 from diffusers.optimization import get_constant_schedule_with_warmup, get_cosine_schedule_with_warmup
-from diffusers import DDIMPipeline, EMAModel
+from diffusers import EMAModel
 from pipeline import KarrasPipeline
 from accelerate import Accelerator
 import os
@@ -16,6 +16,13 @@ from tqdm import tqdm
 import shutil
 import math
 from datasets import load_dataset
+
+
+def map_wrapper(func, from_key, to_key):
+    def wrapper(example):
+        example[to_key] = func(example[from_key])
+        return example
+    return wrapper
 
 
 def get_inverse_sqrt_schedule(optimizer, num_warmup_steps, t_ref):
@@ -60,7 +67,7 @@ def replace_grad_nans(model):
     for name, param in model.named_parameters():
         if param.requires_grad and param.grad is not None:
             # Replace nan, inf, -inf in gradients with 0
-            param.grad = torch.where(~torch.isfinite(param.grad), torch.zeros_like(param.grad), param.grad)
+            torch.nan_to_num(param.grad, nan=0.0, posinf=0.0, neginf=0.0, out=param.grad)
 
 
 def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_scheduler):
@@ -114,19 +121,19 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
             # Add noise to the clean images according to the noise magnitude at each timestep
             sigma = get_sigma(images.shape[0], P_mean, P_std, images.device)
             noisy_images = add_noise(images, noise, sigma)
-            loss_w = get_sigma_weight(sigma, sigma_data) 
+            loss_w = get_sigma_weight(sigma, sigma_data)
 
             with accelerator.accumulate(model):
                 # Predict the noise
                 pred = model(noisy_images, sigma[:, 0, 0, 0], return_dict=False)[0]
 
-                u_sigma = model.loss_mlp(sigma[:, 0, 0, 0])[:, :, None, None]
                 loss = F.mse_loss(pred, images, reduction="none")
-                loss = (loss_w * loss / u_sigma.exp() + u_sigma).mean()
-                accelerator.backward(loss)
+                loss = loss
+                scaled_loss = loss_w * loss
+                u_sigma = model.loss_mlp(sigma[:, 0, 0, 0])[:, :, None, None]
+                scaled_loss_mlp = (scaled_loss / u_sigma.exp() + u_sigma).mean()
+                accelerator.backward(scaled_loss_mlp)
                 replace_grad_nans(model)
-                if accelerator.sync_gradients:
-                    accelerator.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
@@ -135,7 +142,12 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
                 if config.use_ema:
                     ema.step(model.parameters())
                 progress_bar.update(1)
-                logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0], "step": global_step}
+                logs = {
+                    "loss": f'{loss.detach().mean().item():7.5f}',
+                    "scaled_loss": f'{scaled_loss.detach().mean().item():6.4f}',
+                    "mlp_loss": f'{scaled_loss_mlp.detach().item():7.4f}',
+                    "lr": f'{lr_scheduler.get_last_lr()[0]:.6f}', "step": global_step
+                }
                 progress_bar.set_postfix(**logs)
                 accelerator.log(logs, step=global_step)
                 global_step += 1
@@ -163,8 +175,14 @@ def train(config: DictConfig) -> None:
 
     # Dataloader
     train_dataset = load_dataset(config.data.dataset.path, split=config.data.dataset.split)
+    if 'map' in config.data.dataset:
+        assert 'obj' in config.data.dataset.map, 'map object not specified'
+        assert 'from_key' in config.data.dataset.map, 'map from_key not specified'
+        assert 'to_key' in config.data.dataset.map, 'map to_key not specified'
+        map_transform = hydra.utils.instantiate(config.data.dataset.map.obj)
+        map_func = map_wrapper(map_transform, config.data.dataset.map.from_key, config.data.dataset.map.to_key)
+        train_dataset = train_dataset.map(map_func)
     transforms = Compose([
-        Resize((config.image_size, config.image_size)),
         RandomHorizontalFlip(),
         ToTensor(),
         Normalize(mean=[0.5]*3, std=[0.5]*3)
