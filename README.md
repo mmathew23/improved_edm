@@ -18,6 +18,7 @@ accelerate launch train.py
 
 # Inference
 ```
+python generate.py CHECKPOINT
 ```
 
 ## Requirements
