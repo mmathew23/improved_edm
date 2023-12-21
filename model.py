@@ -22,6 +22,7 @@ else:
 
 # Mostly adapted from the diffusers library, thanks HuggingFace!
 
+
 # Taken from paper
 def weight_normalize(x, eps=1e-4):
     dim = list(range(1, x.ndim))
@@ -131,7 +132,7 @@ def get_up_block(
         )
     else:
         raise ValueError(f'Unknown up block type {up_block_type}')
-    
+
 
 class TimestepEmbedding(nn.Module):
     def __init__(
@@ -179,12 +180,11 @@ class ClassEmbedding(nn.Module):
         super().__init__()
 
         self.num_classes = num_classes
-        self.class_embedding = nn.Identity(num_classes, num_classes)
         self.linear = Linear(num_classes, embedding_size, bias=False)
 
-    def forward(self, class_idx):
-        class_embed = self.class_embedding(class_idx) / np.sqrt(self.num_classes)
-        return self.linear(class_embed)
+    def forward(self, class_idx, device, dtype):
+        class_embedding = F.one_hot(class_idx, self.num_classes).to(dtype=dtype, device=device)
+        return self.linear(class_embedding / np.sqrt(self.num_classes))
 
 
 class Upsample2D(nn.Module):
@@ -304,7 +304,7 @@ class Downsample2D(nn.Module):
         hidden_states = self.conv(hidden_states)
 
         return hidden_states
-    
+
 
 class ResnetBlock2D(nn.Module):
     r"""
@@ -453,8 +453,6 @@ class ResnetBlock2D(nn.Module):
 
 def pixel_norm(x: torch.FloatTensor, eps=1e-4):
     return x / torch.sqrt(torch.mean(x ** 2, dim=1, keepdim=True) + eps)
-
-# Remember to set norm_num_groups to None in the Attnetion Module and residual connection
 
 
 class CosineAttnProcessor(nn.Module):
@@ -716,7 +714,7 @@ class AttnDownBlock2D(nn.Module):
             hidden_states = attn(hidden_states, **cross_attention_kwargs)
             hidden_states.clamp(-256, 256)
             output_states = output_states + (hidden_states,)
-        
+
         if self.downsampler is not None:
             hidden_states = self.downsampler(hidden_states, temb=temb, scale=lora_scale)
             output_states = output_states + (hidden_states,)
@@ -1125,7 +1123,7 @@ class UNet2DModel(ModelMixin, ConfigMixin):
 
         # class embedding
         if num_class_embeds is not None:
-            self.class_embedding = ClassEmbedding(num_classes=num_class_embeds, embed_dim=time_embed_dim)
+            self.class_embedding = ClassEmbedding(num_classes=num_class_embeds, embedding_size=time_embed_dim)
         else:
             self.class_embedding = None
 
@@ -1215,12 +1213,16 @@ class UNet2DModel(ModelMixin, ConfigMixin):
         recursive_normal_init(self)
         self.gain = nn.Parameter(torch.ones(1, 1, 1, 1))
 
+    def get_loss_module_weight(self, timestep):
+        return self.loss_mlp(timestep)
+
     def forward(
         self,
         sample: torch.FloatTensor,
         timestep: Union[torch.Tensor, float, int],
         class_labels: Optional[torch.Tensor] = None,
         return_dict: bool = True,
+        return_loss_mlp: bool = False,
     ) -> Union[UNet2DOutput, Tuple]:
         r"""
         The [`UNet2DModel`] forward method.
@@ -1265,7 +1267,7 @@ class UNet2DModel(ModelMixin, ConfigMixin):
             if class_labels is None:
                 raise ValueError("class_labels should be provided when doing class conditioning")
 
-            class_emb = self.class_embedding(class_labels).to(dtype=self.dtype)
+            class_emb = self.class_embedding(class_labels, sample.device, self.dtype).to(dtype=self.dtype)
             emb = emb + class_emb
         elif self.class_embedding is None and class_labels is not None:
             raise ValueError("class_embedding needs to be initialized in order to use class conditioning")
@@ -1317,10 +1319,12 @@ class UNet2DModel(ModelMixin, ConfigMixin):
             c_skip = 0.25 / (0.25+timesteps**2)
             sample += skip_sample * c_skip[:, None, None, None]
 
-        # if self.config.time_embedding_type == "fourier":
-        #     timesteps = timesteps.reshape((sample.shape[0], *([1] * len(sample.shape[1:]))))
-        #     sample = sample / timesteps
+        if return_loss_mlp:
+            loss_w = self.get_loss_module_weight(timesteps)
+            if not return_dict:
+                return (sample,), loss_w
 
+            return UNet2DOutput(sample=sample), loss_w
         if not return_dict:
             return (sample,)
 

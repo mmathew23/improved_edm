@@ -46,6 +46,9 @@ class KarrasPipeline(DiffusionPipeline):
         S_min: float = 0.0,
         S_max: float = float("inf"),
         S_noise: float = 1.0,
+        to_device: Optional[torch.device] = None,
+        second_order: bool = True,
+        class_labels: Optional[torch.Tensor] = None,
     ) -> Union[ImagePipelineOutput, Tuple]:
         # Sample gaussian noise to begin loop
         if isinstance(self.unet.config.sample_size, int):
@@ -84,21 +87,25 @@ class KarrasPipeline(DiffusionPipeline):
             t_hat = torch.as_tensor(t_cur + gamma * t_cur)
             x_hat = image + (t_hat ** 2 - t_cur ** 2).sqrt() * S_noise * torch.randn_like(image)
 
-            denoised = self.unet(x_hat, t_hat).sample
+            denoised = self.unet(x_hat, t_hat, class_labels=class_labels).sample
             d_cur = (x_hat - denoised) / t_hat
             image = x_hat + (t_next - t_hat) * d_cur
 
-            if t < num_inference_steps - 1:
-                denoised = self.unet(image, t_next).sample
+            if second_order and t < num_inference_steps - 1:
+                denoised = self.unet(image, t_next, class_labels=class_labels).sample
                 d_prime = (image - denoised) / t_next
                 image = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 
         image = (image / 2 + 0.5).clamp(0, 1)
-        image = image.cpu()
         if output_type == "pil":
+            image = image.cpu()
             image = self.numpy_to_pil(image.permute(0, 2, 3, 1).numpy())
-        if output_type == "numpy":
-            image = self.numpy_to_tensor(image.permute(0, 2, 3, 1).numpy())
+        elif output_type == "numpy":
+            image = image.cpu()
+            image = image.permute(0, 2, 3, 1).numpy()
+        else:
+            if to_device is not None:
+                image = image.to(to_device)
 
         if not return_dict:
             return (image,)

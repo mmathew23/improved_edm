@@ -1,16 +1,15 @@
 model_name: "improved_edm"
-image_size: 64
-use_ema: False
-train_batch_size: 64
+image_size: 32
+use_ema: True
+train_batch_size: 128
 val_batch_size: 16
-num_epochs: 1000
-gradient_accumulation_steps: 2
-learning_rate: 0.01
-save_image_epochs: 50
-save_model_epochs: 50
+num_train_kimg: 200000
+gradient_accumulation_steps: 4
+learning_rate: 0.0075
+save_image_steps: 20_000 # total_steps = num_train_kimg * 1000 / train_batch_size / gradient_accumulation_steps
+save_model_steps: 40_000 # total_steps = num_train_kimg * 1000 / train_batch_size / gradient_accumulation_steps
 mixed_precision: "fp16"  # `no` for float32, `fp16` for automatic mixed precision
-output_dir: "results/butterflies"
-overwrite_output_dir: true  # overwrite the old model when re-running the notebook
+output_dir: "results/cifar10"
 seed: 24357234501
 training:
   P_mean: -1.2
@@ -22,11 +21,12 @@ unet:
   in_channels: 3
   out_channels: 3
   layers_per_block: 3
-  block_out_channels: [64, 128, 128, 128]
-  down_block_types: ["DownBlock2D", "DownBlock2D", "AttnDownBlock2D", "AttnDownBlock2D"]
-  up_block_types: ["AttnUpBlock2D", "AttnUpBlock2D", "UpBlock2D", "UpBlock2D"]
-  dropout: 0.0
+  block_out_channels: [256, 256, 256]
+  down_block_types: ["DownBlock2D", "AttnDownBlock2D", "AttnDownBlock2D"]
+  up_block_types: ["AttnUpBlock2D", "AttnUpBlock2D", "UpBlock2D"]
+  dropout: 0.13
   add_attention: True
+  num_class_embeds: 10
 noise_scheduler:
   _target_: "diffusers.DDIMScheduler"
   num_train_timesteps: 1000
@@ -37,11 +37,11 @@ optimizer:
   betas: [.9, .99]
 lr_scheduler:
   name: 'inverse_sqrt'
-  num_warmup_steps: 500
-  t_ref: 1000
+  num_warmup_steps: 15_000
+  t_ref: 40_000
 data:
   dataset:
-    path: 'ceyda/smithsonian_butterflies'
+    path: 'cifar10'
     split: 'train'
     map:
       obj:
@@ -49,7 +49,7 @@ data:
         size: 
           - ${image_size}
           - ${image_size}
-      from_key: 'image'
+      from_key: 'img'
       to_key: 'image'
   dataloader:
     num_workers: 8
