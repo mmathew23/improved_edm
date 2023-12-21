@@ -6,8 +6,8 @@ val_batch_size: 16
 num_train_kimg: 200_000
 gradient_accumulation_steps: 4
 learning_rate: 0.0075
-save_image_steps: 20_000 # total_steps = num_train_kimg * 1000 / train_batch_size / gradient_accumulation_steps
-save_model_steps: 40_000 # total_steps = num_train_kimg * 1000 / train_batch_size / gradient_accumulation_steps
+save_image_steps: 10_000 # total_steps = num_train_kimg * 1000 / train_batch_size / gradient_accumulation_steps
+save_model_steps: 10_000 # total_steps = num_train_kimg * 1000 / train_batch_size / gradient_accumulation_steps
 mixed_precision: "fp16"  # `no` for float32, `fp16` for automatic mixed precision
 output_dir: "results/cifar10"
 seed: 24357234501
