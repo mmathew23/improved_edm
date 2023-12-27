@@ -115,10 +115,13 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
         ema = EMAModel(model.parameters(), 0.999, model_cls=UNet2DModel, model_config=model.config)
 
     start_step = 0
+    latest_checkpoint = -1
     if 'resume' in config and config.resume is not None:
         torch_dict = torch.load(config.resume, map_location='cpu')
         optimizer.load_state_dict(torch_dict['optimizer'])
         lr_scheduler.load_state_dict(torch_dict['lr_scheduler'])
+        model.load_state_dict(torch_dict['model'])
+        latest_checkpoint = torch_dict['latest_checkpoint']
         start_step = torch_dict['step']
         if config.use_ema:
             parent_dir = os.path.dirname(config.resume)
@@ -228,18 +231,20 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
                         ema.store(model.parameters())
                         ema.copy_to(model.parameters())
 
-                    evaluate(config, step, pipeline)
+                    evaluate(config, step+1, pipeline)
                     if config.use_ema:
                         ema.restore(model.parameters())
 
                 if save_model:
+                    latest_checkpoint = step+1
                     pipeline.save_pretrained(os.path.join(config.output_dir, f"checkpoints_{step+1}"))
                     torch.save(
                         dict(
                             optimizer=optimizer.state_dict(), 
                             lr_scheduler=lr_scheduler.state_dict(),
-                            model=model.state_dict(),
-                            step=step,
+                            model=model.module.state_dict() if is_distributed else model.state_dict(),
+                            step=step+1,
+                            latest_checkpoint=latest_checkpoint,
                         ), 
                         os.path.join(config.output_dir, f"latest_training_state.pt")
                     )
