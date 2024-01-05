@@ -160,7 +160,6 @@ class GaussianFourierProjection(nn.Module):
         self.weight = nn.Parameter(torch.randn(embedding_size) * scale, requires_grad=False)
         self.phase = nn.Parameter(torch.rand(embedding_size), requires_grad=False)
         self.log = log
-        self.flip_sin_to_cos = flip_sin_to_cos
 
     def forward(self, x):
         if self.log:
@@ -168,10 +167,7 @@ class GaussianFourierProjection(nn.Module):
 
         x_proj = (x[:, None] * self.weight[None, :] + self.phase[None, :]) * 2 * np.pi
 
-        if self.flip_sin_to_cos:
-            out = torch.cat([torch.cos(x_proj), torch.sin(x_proj)], dim=-1)
-        else:
-            out = torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1)
+        out = torch.cos(x_proj)
         return out
 
 
@@ -184,7 +180,7 @@ class ClassEmbedding(nn.Module):
 
     def forward(self, class_idx, device, dtype):
         class_embedding = F.one_hot(class_idx, self.num_classes).to(dtype=dtype, device=device)
-        return self.linear(class_embedding / np.sqrt(self.num_classes))
+        return self.linear(class_embedding * np.sqrt(self.num_classes))
 
 
 class Upsample2D(nn.Module):
@@ -1115,7 +1111,7 @@ class UNet2DModel(ModelMixin, ConfigMixin):
 
         # time
         self.time_proj = GaussianFourierProjection(embedding_size=block_out_channels[0], scale=0.25)
-        timestep_input_dim = 2 * block_out_channels[0]
+        timestep_input_dim = block_out_channels[0]
         self.time_embedding = TimestepEmbedding(timestep_input_dim, time_embed_dim)
 
         # loss weighting 
@@ -1301,7 +1297,6 @@ class UNet2DModel(ModelMixin, ConfigMixin):
                 sample = block(sample)
             else:
                 sample = block(sample, emb)
-
         # 5. up
         for upsample_block in self.up_blocks:
             res_samples = down_block_res_samples[-len(upsample_block.resnets) :]
