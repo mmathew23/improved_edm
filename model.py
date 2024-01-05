@@ -1275,9 +1275,9 @@ class UNet2DModel(ModelMixin, ConfigMixin):
         b, c, h, w = sample.shape
         ones_tensor = torch.ones(b, 1, h, w, dtype=sample.dtype, device=sample.device)
         # Concatenate along the channel dimension
-        sample = torch.cat((sample, ones_tensor), dim=1)
         c_in = 1 / torch.sqrt(0.25+timesteps**2)
-        sample = self.conv_in(sample*c_in[:, None, None, None])
+        sample = torch.cat((sample*c_in[:, None, None, None], ones_tensor), dim=1)
+        sample = self.conv_in(sample)
 
         # 3. down
         down_block_res_samples = (sample,)
