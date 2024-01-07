@@ -44,7 +44,7 @@ class Sampler(torch.utils.data.Sampler):
 
 def get_total_steps(config):
     # round up, round since casting may round down due to fp precision
-    total_steps = int(round(config.num_train_kimg * 1000 / (config.train_batch_size * config.gradient_accumulation_steps) + 0.5))
+    total_steps = int(round(config.num_train_kimg * 1000 / (config.train_batch_size) + 0.5))
     return total_steps
 
 
@@ -111,26 +111,8 @@ def replace_grad_nans(model):
 
 def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_scheduler):
 
-    if config.use_ema:
-        ema = EMAModel(model.parameters(), 0.999, model_cls=UNet2DModel, model_config=model.config)
-
-    start_step = 0
-    latest_checkpoint = -1
-    if 'resume' in config and config.resume is not None:
-        torch_dict = torch.load(config.resume, map_location='cpu')
-        optimizer.load_state_dict(torch_dict['optimizer'])
-        lr_scheduler.load_state_dict(torch_dict['lr_scheduler'])
-        model.load_state_dict(torch_dict['model'])
-        latest_checkpoint = torch_dict['latest_checkpoint']
-        start_step = torch_dict['step']
-        if config.use_ema:
-            parent_dir = os.path.dirname(config.resume)
-            parent_dir_children = os.listdir(parent_dir)
-            numbers = [int(re.match(r"ema_checkpoints_(\d+)", f).group(1)) for f in parent_dir_children if re.match(r"ema_checkpoints_(\d+)", f)]
-            num = max(numbers)
-            ema.from_pretrained(os.path.join(parent_dir, f'ema_checkpoints_{num}'), model_cls=UNet2DModel)
-
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
+    assert 'gradient_accumulation_steps' in config and config.gradient_accumulation_steps >= 1
     accelerator = Accelerator(
         mixed_precision=config.mixed_precision,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
@@ -140,6 +122,29 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
         split_batches=True
     )
     is_distributed = accelerator.num_processes > 1
+
+    if config.use_ema:
+        ema = EMAModel(model.parameters(), 0.999, model_cls=UNet2DModel, model_config=model.config)
+
+    start_step = 0
+    latest_checkpoint = -1
+    if 'resume' in config and config.resume is not None:
+        print(f"Resuming from {config.resume}")
+        torch_dict = torch.load(config.resume, map_location='cpu')
+        optimizer.load_state_dict(torch_dict['optimizer'])
+        lr_scheduler.load_state_dict(torch_dict['lr_scheduler'])
+        if "scaler" in torch_dict:
+            accelerator.scaler.load_state_dict(torch_dict["scaler"])
+        model.load_state_dict(torch_dict['model'])
+        latest_checkpoint = torch_dict['latest_checkpoint']
+        start_step = torch_dict['step']
+        if config.use_ema:
+            parent_dir = os.path.dirname(config.resume)
+            parent_dir_children = os.listdir(parent_dir)
+            numbers = [int(re.match(r"ema_checkpoints_(\d+)", f).group(1)) for f in parent_dir_children if re.match(r"ema_checkpoints_(\d+)", f)]
+            num = max(numbers)
+            print(f"Using EMA checkpoint {num}")
+            ema.from_pretrained(os.path.join(parent_dir, f'ema_checkpoints_{num}'), model_cls=UNet2DModel)
 
     if accelerator.is_main_process:
         # Create output directory if needed, and asserted for not None in train
@@ -188,8 +193,9 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
             pred, u_sigma = model(noisy_images, sigma[:, 0, 0, 0], class_labels=label, return_dict=False, return_loss_mlp=True)
 
             loss = F.mse_loss(pred[0], images, reduction="none")
-            scaled_loss = loss_w * loss
-            u_sigma = u_sigma[:, :, None, None]
+            loss = loss.mean(dim=(1,2,3))
+            scaled_loss = loss_w[:, 0, 0, 0] * loss
+            u_sigma = u_sigma[:, 0]
             scaled_loss_mlp = (scaled_loss / u_sigma.exp() + u_sigma).mean()
             accelerator.backward(scaled_loss_mlp)
             replace_grad_nans(model)
@@ -200,7 +206,7 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
         if accelerator.sync_gradients:
             if config.use_ema:
                 ema.step(model.parameters())
-            progress_bar.update(1)
+            progress_bar.update(config.gradient_accumulation_steps)
             logs = {
                 "loss": loss.detach().mean().item(),
                 "scaled_loss": scaled_loss.detach().mean().item(),
@@ -238,15 +244,21 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
                 if save_model:
                     latest_checkpoint = step+1
                     pipeline.save_pretrained(os.path.join(config.output_dir, f"checkpoints_{step+1}"))
+                    save_dict = dict(
+                                    optimizer=optimizer.state_dict(),
+                                    lr_scheduler=lr_scheduler.state_dict(),
+                                    model=model.module.state_dict() if is_distributed else model.state_dict(),
+                                    step=step+1,
+                                    latest_checkpoint=latest_checkpoint,
+                                    scaler=accelerator.scaler.state_dict() if config.mixed_precision else None,
+                                )
                     torch.save(
-                        dict(
-                            optimizer=optimizer.state_dict(), 
-                            lr_scheduler=lr_scheduler.state_dict(),
-                            model=model.module.state_dict() if is_distributed else model.state_dict(),
-                            step=step+1,
-                            latest_checkpoint=latest_checkpoint,
-                        ), 
+                        save_dict,
                         os.path.join(config.output_dir, f"latest_training_state.pt")
+                    )
+                    torch.save(
+                        save_dict,
+                        os.path.join(config.output_dir, f"training_state_{step+1}.pt")
                     )
                     if config.use_ema:
                         ema_save_dir = os.path.join(config.output_dir, f"ema_checkpoints_{step+1}")

@@ -1153,27 +1153,48 @@ class UNet2DModel(ModelMixin, ConfigMixin):
         self.add_attention = add_attention
         if add_attention:
             self.mid_block.append(
-                Attention(
-                    block_out_channels[-1],
-                    heads=block_out_channels[-1] // attention_head_dim,
-                    dim_head=attention_head_dim,
-                    rescale_output_factor=mid_block_scale_factor,
-                    eps=norm_eps,
-                    residual_connection=True,
-                    bias=False,
-                    out_bias=False,
-                    upcast_softmax=False, #CosineAttnProcessor should allow for 16bit fully
-                    _from_deprecated_attn_block=True,
+                # Attention(
+                #     block_out_channels[-1],
+                #     heads=block_out_channels[-1] // attention_head_dim,
+                #     dim_head=attention_head_dim,
+                #     rescale_output_factor=mid_block_scale_factor,
+                #     eps=norm_eps,
+                #     residual_connection=True,
+                #     bias=False,
+                #     out_bias=False,
+                #     upcast_softmax=False, #CosineAttnProcessor should allow for 16bit fully
+                #     _from_deprecated_attn_block=True,
+                # )
+                AttnDownBlock2D(
+                    in_channels=block_out_channels[-1],
+                    out_channels=block_out_channels[-1],
+                    temb_channels=time_embed_dim,
+                    dropout=dropout,
+                    num_layers=1,
+                    resnet_eps=norm_eps,
+                    output_scale_factor=resnet_out_scale_factor,
+                    attention_head_dim=attention_head_dim,
+                    add_downsample=False
                 )
             )
         self.mid_block.append(
-            ResnetBlock2D(
+            # ResnetBlock2D(
+            #     in_channels=block_out_channels[-1],
+            #     out_channels=block_out_channels[-1],
+            #     temb_channels=time_embed_dim,
+            #     eps=norm_eps,
+            #     dropout=dropout,
+            #     output_scale_factor=mid_block_scale_factor,
+            # )
+            DownBlock2D(
                 in_channels=block_out_channels[-1],
                 out_channels=block_out_channels[-1],
                 temb_channels=time_embed_dim,
-                eps=norm_eps,
                 dropout=dropout,
-                output_scale_factor=mid_block_scale_factor,
+                num_layers=1,
+                resnet_eps=norm_eps,
+                output_scale_factor=resnet_out_scale_factor,
+                add_downsample=False
             )
         )
 
@@ -1293,10 +1314,14 @@ class UNet2DModel(ModelMixin, ConfigMixin):
 
         # 4. mid
         for i, block in enumerate(self.mid_block):
-            if i == 0 and self.add_attention:
+            if i == 0 and self.add_attention and isinstance(block, Attention):
                 sample = block(sample)
+                if isinstance(sample, tuple):
+                    sample = sample[0]
             else:
                 sample = block(sample, emb)
+                if isinstance(sample, tuple):
+                    sample = sample[0]
         # 5. up
         for upsample_block in self.up_blocks:
             res_samples = down_block_res_samples[-len(upsample_block.resnets) :]
