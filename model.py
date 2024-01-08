@@ -442,7 +442,6 @@ class ResnetBlock2D(nn.Module):
         hidden_states = self.conv2(hidden_states)
 
         output_tensor = (input_tensor + hidden_states) / self.output_scale_factor
-        output_tensor.clamp(-256, 256)
 
         return output_tensor
 
@@ -708,7 +707,6 @@ class AttnDownBlock2D(nn.Module):
             cross_attention_kwargs.update({"scale": lora_scale})
             hidden_states = resnet(hidden_states, temb, scale=lora_scale)
             hidden_states = attn(hidden_states, **cross_attention_kwargs)
-            hidden_states.clamp(-256, 256)
             output_states = output_states + (hidden_states,)
 
         if self.downsampler is not None:
@@ -891,7 +889,6 @@ class AttnUpBlock2D(nn.Module):
             hidden_states = resnet(hidden_states, temb, scale=scale)
             cross_attention_kwargs = {"scale": scale}
             hidden_states = attn(hidden_states, **cross_attention_kwargs)
-            hidden_states.clamp(-256, 256)
 
         if self.upsampler is not None:
             hidden_states = self.upsampler(hidden_states, temb=temb, scale=scale)
