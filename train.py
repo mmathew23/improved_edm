@@ -11,6 +11,7 @@ from diffusers.optimization import get_constant_schedule_with_warmup, get_cosine
 from diffusers import EMAModel
 from pipeline import KarrasPipeline
 from accelerate import Accelerator, DistributedDataParallelKwargs
+from accelerate.utils import LoggerType
 import os
 from tqdm import tqdm
 import shutil
@@ -116,7 +117,7 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
     accelerator = Accelerator(
         mixed_precision=config.mixed_precision,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
-        log_with="tensorboard",
+        log_with=["wandb", LoggerType.TENSORBOARD],
         project_dir=os.path.join(config.output_dir, "logs"),
         kwargs_handlers=[ddp_kwargs],
         split_batches=True
@@ -158,7 +159,17 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
         f_name = 'overrides.yaml'
         shutil.copy2(os.path.join(hydra_dir, f_name), os.path.join(config.output_dir, f_name))
 
-        accelerator.init_trackers(config.model_name)
+        accelerator.init_trackers(
+            config.model_name,
+            config={
+                'resume': config.resume if 'resume' in config else '',
+                'batch_size': config.train_batch_size,
+                'num_train_kimg': config.num_train_kimg,
+                'lr': config.learning_rate,
+                'dataset': config.data.dataset.path,
+            },
+        )
+
 
     # Prepare everything
     # There is no specific order to remember, you just need to unpack the
