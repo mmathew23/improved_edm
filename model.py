@@ -231,10 +231,6 @@ class Upsample2D(nn.Module):
         if dtype == torch.bfloat16:
             hidden_states = hidden_states.to(torch.float32)
 
-        # upsample_nearest_nhwc fails with large batch sizes. see https://github.com/huggingface/diffusers/issues/984
-        if hidden_states.shape[0] >= 64:
-            hidden_states = hidden_states.contiguous()
-
         # if `output_size` is passed we force the interpolation output
         # size and do not make use of `scale_factor=2`
         if output_size is None:
@@ -393,9 +389,6 @@ class ResnetBlock2D(nn.Module):
     ) -> torch.FloatTensor:
         if self.block_type == 'up':
             if self.upsample is not None:
-                # upsample_nearest_nhwc fails with large batch sizes. see https://github.com/huggingface/diffusers/issues/984
-                if input_tensor.shape[0] >= 64:
-                    input_tensor = input_tensor.contiguous()
                 input_tensor = (
                     self.upsample(input_tensor, scale=scale)
                 )
@@ -490,8 +483,6 @@ class CosineAttnProcessor(nn.Module):
 
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
-        elif attn.norm_cross:
-            encoder_hidden_states = attn.norm_encoder_hidden_states(encoder_hidden_states)
 
         key = pixel_norm(attn.to_k(encoder_hidden_states, *args))
         value = pixel_norm(attn.to_v(encoder_hidden_states, *args))
@@ -519,7 +510,8 @@ class CosineAttnProcessor(nn.Module):
         hidden_states = attn.to_out[1](hidden_states)
 
         if input_ndim == 4:
-            hidden_states = hidden_states.transpose(-1, -2).reshape(batch_size, channel, height, width)
+            # contiguous is needed to prevent Grad strides do not match bucket view strides UserWarning but seems to come at a performance cost
+            hidden_states = hidden_states.transpose(-1, -2).reshape(batch_size, channel, height, width)  # .contiguous()
 
         if attn.residual_connection:
             hidden_states = hidden_states + residual

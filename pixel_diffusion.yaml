@@ -2,7 +2,7 @@ model_name: "improved_edm"
 image_size: 32
 use_ema: True
 train_batch_size: 128
-val_batch_size: 16
+val_batch_size: 64
 num_train_kimg: 200_000
 gradient_accumulation_steps: 4
 learning_rate: 0.005

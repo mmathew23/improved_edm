@@ -72,14 +72,16 @@ def evaluate(config, step, pipeline):
             labels = labels[:config.val_batch_size]
     else:
         labels = None
-    for i in range(4):
+    for i in range(1):
         images = pipeline(
             batch_size=config.val_batch_size,
             class_labels=labels,
             generator=torch.manual_seed(config.seed+i),
         ).images
 
-        image_grid = make_image_grid(images, rows=4, cols=len(images)//4 + (1 if len(images) % 4 != 0 else 0))
+        cols = math.ceil(np.sqrt(len(images)))
+        rows = math.ceil(len(images)/cols)
+        image_grid = make_image_grid(images, rows=rows, cols=cols)
 
         test_dir = os.path.join(config.output_dir, "samples")
         os.makedirs(test_dir, exist_ok=True)
@@ -207,8 +209,8 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
             loss = loss.mean(dim=(1,2,3))
             scaled_loss = loss_w[:, 0, 0, 0] * loss
             u_sigma = u_sigma[:, 0]
-            scaled_loss_mlp = (scaled_loss / u_sigma.exp() + u_sigma).mean()
-            accelerator.backward(scaled_loss_mlp)
+            scaled_loss_mlp = (scaled_loss / u_sigma.exp() + u_sigma)
+            accelerator.backward(scaled_loss_mlp.mean())
             replace_grad_nans(model)
             optimizer.step()
             lr_scheduler.step()
@@ -218,10 +220,14 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
             if config.use_ema:
                 ema.step(model.parameters())
             progress_bar.update(config.gradient_accumulation_steps)
+
+            loss = accelerator.gather(loss).detach()
+            scaled_loss = accelerator.gather(scaled_loss).detach()
+            scaled_loss_mlp = accelerator.gather(scaled_loss_mlp).detach()
             logs = {
-                "loss": loss.detach().mean().item(),
-                "scaled_loss": scaled_loss.detach().mean().item(),
-                "mlp_loss": scaled_loss_mlp.detach().item(),
+                "loss": loss.mean().item(),
+                "scaled_loss": scaled_loss.mean().item(),
+                "mlp_loss": scaled_loss_mlp.mean().item(),
                 "lr": lr_scheduler.get_last_lr()[0],
                 "step": step+1
             }
