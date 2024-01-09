@@ -5,7 +5,7 @@ train_batch_size: 128
 val_batch_size: 64
 num_train_kimg: 200_000
 gradient_accumulation_steps: 4
-learning_rate: 0.005
+learning_rate: 0.002
 save_image_steps: 5_000 # total_steps = num_train_kimg * 1000 / train_batch_size / gradient_accumulation_steps
 save_model_steps: 5_000 # total_steps = num_train_kimg * 1000 / train_batch_size / gradient_accumulation_steps
 mixed_precision: "fp16"  # `no` for float32, `fp16` for automatic mixed precision
