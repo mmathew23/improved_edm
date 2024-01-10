@@ -172,7 +172,6 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
             },
         )
 
-
     # Prepare everything
     # There is no specific order to remember, you just need to unpack the
     # objects in the same order you gave them to the prepare method.
@@ -182,12 +181,13 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
     if config.use_ema:
         ema.to(accelerator.device)
 
-
     P_mean, P_std, sigma_data = config.training.P_mean, config.training.P_std, config.training.sigma_data
     total_steps = get_total_steps(config)
     progress_bar = tqdm(total=total_steps-start_step, disable=not accelerator.is_local_main_process)
-    progress_bar.set_description(f"Train")
+    progress_bar.set_description("Train")
     train_iter = iter(train_dataloader)
+    loss_type = config.loss_type if hasattr(config, 'loss_type') else 'mlp'
+    assert loss_type in ['mlp', 'scaled'], 'loss type not supported'
     for step in range(start_step, total_steps):
         batch = next(train_iter)
         images = batch["images"]
@@ -210,7 +210,12 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
             scaled_loss = loss_w[:, 0, 0, 0] * loss
             u_sigma = u_sigma[:, 0]
             scaled_loss_mlp = (scaled_loss / u_sigma.exp() + u_sigma)
-            accelerator.backward(scaled_loss_mlp.mean())
+            if loss_type == 'scaled':
+                accelerator.backward(scaled_loss.mean())
+            elif loss_type == 'mlp':
+                accelerator.backward(scaled_loss_mlp.mean())
+            else:
+                raise NotImplementedError(f'loss_type {loss_type} not supported')
             replace_grad_nans(model)
             optimizer.step()
             lr_scheduler.step()
@@ -227,6 +232,7 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
             logs = {
                 "loss": loss.mean().item(),
                 "scaled_loss": scaled_loss.mean().item(),
+                "scaled_loss_std": scaled_loss.std().item(),
                 "mlp_loss": scaled_loss_mlp.mean().item(),
                 "lr": lr_scheduler.get_last_lr()[0],
                 "step": step+1
