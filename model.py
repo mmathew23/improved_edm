@@ -484,8 +484,8 @@ class CosineAttnProcessor(nn.Module):
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
 
-        key = attn.to_k(encoder_hidden_states, *args), dim=-1)
-        value = attn.to_v(encoder_hidden_states, *args), dim=-1)
+        key = attn.to_k(encoder_hidden_states, *args)
+        value = attn.to_v(encoder_hidden_states, *args)
 
         inner_dim = key.shape[-1]
         head_dim = inner_dim // attn.heads
