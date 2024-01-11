@@ -407,7 +407,7 @@ class ResnetBlock2D(nn.Module):
                 input_tensor = (
                     self.conv_shortcut(input_tensor)
                 )
-            input_tensor = pixel_norm(input_tensor)
+            input_tensor = pixel_norm(input_tensor, dim=1)
             hidden_states = input_tensor
             hidden_states = self.nonlinearity(hidden_states)
         else:
@@ -415,7 +415,7 @@ class ResnetBlock2D(nn.Module):
                 input_tensor = (
                     self.conv_shortcut(input_tensor)
                 )
-            input_tensor = pixel_norm(input_tensor)
+            input_tensor = pixel_norm(input_tensor, dim=1)
             hidden_states = input_tensor
             hidden_states = self.nonlinearity(hidden_states)
 
@@ -439,8 +439,8 @@ class ResnetBlock2D(nn.Module):
         return output_tensor
 
 
-def pixel_norm(x: torch.FloatTensor, eps=1e-4):
-    return x / torch.sqrt(torch.mean(x ** 2, dim=1, keepdim=True) + eps)
+def pixel_norm(x: torch.FloatTensor, eps=1e-4, dim=1):
+    return x / torch.sqrt(torch.mean(x ** 2, dim=dim, keepdim=True) + eps)
 
 
 class CosineAttnProcessor(nn.Module):
@@ -479,13 +479,13 @@ class CosineAttnProcessor(nn.Module):
             attention_mask = attention_mask.view(batch_size, attn.heads, -1, attention_mask.shape[-1])
 
         args = ()
-        query = pixel_norm(attn.to_q(hidden_states, *args))
+        query = pixel_norm(attn.to_q(hidden_states, *args), dim=-1)
 
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
 
-        key = pixel_norm(attn.to_k(encoder_hidden_states, *args))
-        value = pixel_norm(attn.to_v(encoder_hidden_states, *args))
+        key = pixel_norm(attn.to_k(encoder_hidden_states, *args), dim=-1)
+        value = pixel_norm(attn.to_v(encoder_hidden_states, *args), dim=-1)
 
         inner_dim = key.shape[-1]
         head_dim = inner_dim // attn.heads
@@ -563,15 +563,15 @@ class XFormersCosineAttnProcessor(nn.Module):
             _, query_tokens, _ = hidden_states.shape
             attention_mask = attention_mask.expand(-1, query_tokens, -1)
 
-        query = pixel_norm(attn.to_q(hidden_states, *args))
+        query = pixel_norm(attn.to_q(hidden_states, *args), dim=-1)
 
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
         elif attn.norm_cross:
             encoder_hidden_states = attn.norm_encoder_hidden_states(encoder_hidden_states)
 
-        key = pixel_norm(attn.to_k(encoder_hidden_states, *args))
-        value = pixel_norm(attn.to_v(encoder_hidden_states, *args))
+        key = pixel_norm(attn.to_k(encoder_hidden_states, *args), dim=-1)
+        value = pixel_norm(attn.to_v(encoder_hidden_states, *args), dim=-1)
 
         query = attn.head_to_batch_dim(query).contiguous()
         key = attn.head_to_batch_dim(key).contiguous()
