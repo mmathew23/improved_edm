@@ -119,7 +119,7 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
     accelerator = Accelerator(
         mixed_precision=config.mixed_precision,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
-        log_with=["wandb", LoggerType.TENSORBOARD],
+        log_with=[LoggerType.TENSORBOARD],
         project_dir=os.path.join(config.output_dir, "logs"),
         kwargs_handlers=[ddp_kwargs],
         split_batches=True

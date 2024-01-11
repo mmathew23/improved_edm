@@ -38,7 +38,8 @@ class Conv2d(nn.Conv2d):
                 self.weight.copy_(weight_normalize(self.weight))
         fan_in = self.weight[0].numel()
         weight = weight_normalize(self.weight) / np.sqrt(fan_in)
-        return self._conv_forward(x, weight, None)
+        # return self._conv_forward(x, weight, None)
+        return F.conv2d(x, weight, None, padding='same')
 
 
 class Linear(nn.Linear):
@@ -273,27 +274,21 @@ class Downsample2D(nn.Module):
         self.channels = channels
         self.out_channels = out_channels or channels
         self.use_conv = use_conv
-        self.padding = padding
-        stride = 2
+        self.padding = 0
+        stride = 1
 
+        self.pool = nn.AvgPool2d(kernel_size=2)
+        conv = None
         if use_conv:
             conv = Conv2d(self.channels, self.out_channels, 3, stride=stride, padding=padding, bias=False)
-        else:
-            assert self.channels == self.out_channels
-            conv = nn.AvgPool2d(kernel_size=stride, stride=stride)
-
         self.conv = conv
 
     def forward(self, hidden_states: torch.FloatTensor, scale: float = 1.0) -> torch.FloatTensor:
         assert hidden_states.shape[1] == self.channels
 
-        if self.use_conv and self.padding == 0:
-            pad = (0, 1, 0, 1)
-            hidden_states = F.pad(hidden_states, pad, mode="constant", value=0)
-
-        assert hidden_states.shape[1] == self.channels
-
-        hidden_states = self.conv(hidden_states)
+        hidden_states = self.pool(hidden_states)
+        if self.use_conv:
+            hidden_states = self.conv(hidden_states)
 
         return hidden_states
 
@@ -460,6 +455,7 @@ class CosineAttnProcessor(nn.Module):
     ) -> torch.FloatTensor:
         residual = hidden_states
         if attn.spatial_norm is not None:
+            print('spatial')
             hidden_states = attn.spatial_norm(hidden_states, temb)
 
         input_ndim = hidden_states.ndim
@@ -473,6 +469,7 @@ class CosineAttnProcessor(nn.Module):
         )
 
         if attention_mask is not None:
+            print('attentionm sd')
             attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length, batch_size)
             # scaled_dot_product_attention expects attention_mask shape to be
             # (batch, heads, source_length, target_length)
@@ -507,7 +504,7 @@ class CosineAttnProcessor(nn.Module):
         # linear proj
         hidden_states = attn.to_out[0](hidden_states, *args)
         # dropout
-        hidden_states = attn.to_out[1](hidden_states)
+        # hidden_states = attn.to_out[1](hidden_states)
 
         if input_ndim == 4:
             # contiguous is needed to prevent Grad strides do not match bucket view strides UserWarning but seems to come at a performance cost
@@ -586,7 +583,7 @@ class XFormersCosineAttnProcessor(nn.Module):
         # linear proj
         hidden_states = attn.to_out[0](hidden_states, *args)
         # dropout
-        hidden_states = attn.to_out[1](hidden_states)
+        # hidden_states = attn.to_out[1](hidden_states)
 
         if input_ndim == 4:
             hidden_states = hidden_states.transpose(-1, -2).reshape(batch_size, channel, height, width)
@@ -662,6 +659,7 @@ class AttnDownBlock2D(nn.Module):
                     out_bias=False,
                     upcast_softmax=False, # Cosine attention should allow for fully 16bit training
                     _from_deprecated_attn_block=True,
+                    dropout=0.0,
                 )
             )
             patch_attention_linear_layers(attentions[-1])
@@ -846,6 +844,7 @@ class AttnUpBlock2D(nn.Module):
                     out_bias=False,
                     upcast_softmax=True,
                     _from_deprecated_attn_block=True,
+                    dropout=0.0,
                 )
             )
             patch_attention_linear_layers(attentions[-1])
@@ -1150,18 +1149,6 @@ class UNet2DModel(ModelMixin, ConfigMixin):
         self.add_attention = add_attention
         if add_attention:
             self.mid_block.append(
-                # Attention(
-                #     block_out_channels[-1],
-                #     heads=block_out_channels[-1] // attention_head_dim,
-                #     dim_head=attention_head_dim,
-                #     rescale_output_factor=mid_block_scale_factor,
-                #     eps=norm_eps,
-                #     residual_connection=True,
-                #     bias=False,
-                #     out_bias=False,
-                #     upcast_softmax=False, #CosineAttnProcessor should allow for 16bit fully
-                #     _from_deprecated_attn_block=True,
-                # )
                 AttnDownBlock2D(
                     in_channels=block_out_channels[-1],
                     out_channels=block_out_channels[-1],
@@ -1175,14 +1162,6 @@ class UNet2DModel(ModelMixin, ConfigMixin):
                 )
             )
         self.mid_block.append(
-            # ResnetBlock2D(
-            #     in_channels=block_out_channels[-1],
-            #     out_channels=block_out_channels[-1],
-            #     temb_channels=time_embed_dim,
-            #     eps=norm_eps,
-            #     dropout=dropout,
-            #     output_scale_factor=mid_block_scale_factor,
-            # )
             DownBlock2D(
                 in_channels=block_out_channels[-1],
                 out_channels=block_out_channels[-1],
