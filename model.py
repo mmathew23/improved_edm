@@ -38,7 +38,6 @@ class Conv2d(nn.Conv2d):
                 self.weight.copy_(weight_normalize(self.weight))
         fan_in = self.weight[0].numel()
         weight = weight_normalize(self.weight) / np.sqrt(fan_in)
-        # return self._conv_forward(x, weight, None)
         return F.conv2d(x, weight, None, padding='same')
 
 
