@@ -479,21 +479,21 @@ class CosineAttnProcessor(nn.Module):
             attention_mask = attention_mask.view(batch_size, attn.heads, -1, attention_mask.shape[-1])
 
         args = ()
-        query = pixel_norm(attn.to_q(hidden_states, *args), dim=-1)
+        query = attn.to_q(hidden_states, *args)
 
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
 
-        key = pixel_norm(attn.to_k(encoder_hidden_states, *args), dim=-1)
-        value = pixel_norm(attn.to_v(encoder_hidden_states, *args), dim=-1)
+        key = attn.to_k(encoder_hidden_states, *args), dim=-1)
+        value = attn.to_v(encoder_hidden_states, *args), dim=-1)
 
         inner_dim = key.shape[-1]
         head_dim = inner_dim // attn.heads
 
-        query = query.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
+        query = pixel_norm(query.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2), dim=-1)
 
-        key = key.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
-        value = value.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
+        key = pixel_norm(key.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2), dim=-1)
+        value = pixel_norm(value.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2), dim=-1)
 
         # the output of sdp = (batch, num_heads, seq_len, head_dim)
         # TODO: add support for attn.scale when we move to Torch 2.1
@@ -563,19 +563,19 @@ class XFormersCosineAttnProcessor(nn.Module):
             _, query_tokens, _ = hidden_states.shape
             attention_mask = attention_mask.expand(-1, query_tokens, -1)
 
-        query = pixel_norm(attn.to_q(hidden_states, *args), dim=-1)
+        query = attn.to_q(hidden_states, *args)
 
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
         elif attn.norm_cross:
             encoder_hidden_states = attn.norm_encoder_hidden_states(encoder_hidden_states)
 
-        key = pixel_norm(attn.to_k(encoder_hidden_states, *args), dim=-1)
-        value = pixel_norm(attn.to_v(encoder_hidden_states, *args), dim=-1)
+        key = attn.to_k(encoder_hidden_states, *args)
+        value = attn.to_v(encoder_hidden_states, *args)
 
-        query = attn.head_to_batch_dim(query).contiguous()
-        key = attn.head_to_batch_dim(key).contiguous()
-        value = attn.head_to_batch_dim(value).contiguous()
+        query = pixel_norm(attn.head_to_batch_dim(query).contiguous(), dim=-1)
+        key = pixel_norm(attn.head_to_batch_dim(key).contiguous(), dim=-1)
+        value = pixel_norm(attn.head_to_batch_dim(value).contiguous(), dim=-1)
 
         hidden_states = xformers.ops.memory_efficient_attention(
             query, key, value, attn_bias=attention_mask, op=self.attention_op, scale=attn.scale
