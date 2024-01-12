@@ -454,7 +454,6 @@ class CosineAttnProcessor(nn.Module):
     ) -> torch.FloatTensor:
         residual = hidden_states
         if attn.spatial_norm is not None:
-            print('spatial')
             hidden_states = attn.spatial_norm(hidden_states, temb)
 
         input_ndim = hidden_states.ndim
@@ -468,7 +467,6 @@ class CosineAttnProcessor(nn.Module):
         )
 
         if attention_mask is not None:
-            print('attentionm sd')
             attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length, batch_size)
             # scaled_dot_product_attention expects attention_mask shape to be
             # (batch, heads, source_length, target_length)
