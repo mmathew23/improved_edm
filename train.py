@@ -127,7 +127,7 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
     is_distributed = accelerator.num_processes > 1
 
     if config.use_ema:
-        ema = EMAModel(model.parameters(), 0.999, model_cls=UNet2DModel, model_config=model.config)
+        ema = EMAModel(model.parameters(), 0.999, model_cls=type(model), model_config=model.config)
 
     start_step = 0
     latest_checkpoint = -1
@@ -341,9 +341,6 @@ def train(config: DictConfig) -> None:
 
     else:
         raise NotImplementedError("Only cosine, constant, and inverse_sqrt lr schedulers are supported")
-
-
-
 
 
     train_loop(config, unet, noise_scheduler, optimizer, train_dataloader, lr_scheduler)
