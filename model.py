@@ -839,7 +839,7 @@ class AttnUpBlock2D(nn.Module):
                     residual_connection=True,
                     bias=False,
                     out_bias=False,
-                    upcast_softmax=True,
+                    upcast_softmax=False,
                     _from_deprecated_attn_block=True,
                     dropout=0.0,
                 )

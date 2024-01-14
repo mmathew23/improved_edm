@@ -108,6 +108,8 @@ def replace_grad_nans(model):
     # Iterate through all parameters
     for name, param in model.named_parameters():
         if param.requires_grad and param.grad is not None:
+            if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                print(f"Replacing nan/inf in {name}")
             # Replace nan, inf, -inf in gradients with 0
             torch.nan_to_num(param.grad, nan=0.0, posinf=0.0, neginf=0.0, out=param.grad)
 
@@ -187,6 +189,7 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
     progress_bar.set_description("Train")
     train_iter = iter(train_dataloader)
     loss_type = config.loss_type if hasattr(config, 'loss_type') else 'mlp'
+    loss_scaling = config.get('loss_scaling', 1.0)
     assert loss_type in ['mlp', 'scaled'], 'loss type not supported'
     for step in range(start_step, total_steps):
         batch = next(train_iter)
@@ -207,7 +210,7 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
 
             loss = F.mse_loss(pred[0], images, reduction="none")
             loss = loss.mean(dim=(1,2,3))
-            scaled_loss = loss_w[:, 0, 0, 0] * loss
+            scaled_loss = loss_w[:, 0, 0, 0] * loss * loss_scaling
             u_sigma = u_sigma[:, 0]
             scaled_loss_mlp = (scaled_loss / u_sigma.exp() + u_sigma)
             if loss_type == 'scaled':

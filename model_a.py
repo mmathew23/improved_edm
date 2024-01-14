@@ -650,7 +650,7 @@ class AttnDownBlock2D(nn.Module):
                     residual_connection=True,
                     bias=BIAS,
                     out_bias=BIAS,
-                    upcast_softmax=False, # Cosine attention should allow for fully 16bit training
+                    upcast_softmax=True,
                     _from_deprecated_attn_block=True,
                     dropout=0.0,
                     norm_num_groups=resnet_groups,
