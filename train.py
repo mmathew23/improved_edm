@@ -276,7 +276,7 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
                                     model=model.module.state_dict() if is_distributed else model.state_dict(),
                                     step=step+1,
                                     latest_checkpoint=latest_checkpoint,
-                                    scaler=accelerator.scaler.state_dict() if hasattr(accelerator.scaler) and accelerator.scaler is not None else None,
+                                    scaler=accelerator.scaler.state_dict() if hasattr(accelerator, 'scaler') and accelerator.scaler is not None else None,
                                 )
                     torch.save(
                         save_dict,
