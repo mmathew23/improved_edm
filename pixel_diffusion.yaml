@@ -12,7 +12,7 @@ mixed_precision: "no"  # `no` for float32, `fp16` for automatic mixed precision
 output_dir: "results/cifar10"
 seed: 2435723453
 loss_type: 'scaled'
-loss_scaling: 100
+loss_scaling: 1.0
 training:
   P_mean: -1.2
   P_std: 1.2

@@ -138,7 +138,7 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
         torch_dict = torch.load(config.resume, map_location='cpu')
         optimizer.load_state_dict(torch_dict['optimizer'])
         lr_scheduler.load_state_dict(torch_dict['lr_scheduler'])
-        if "scaler" in torch_dict:
+        if "scaler" in torch_dict and torch_dict["scaler"] is not None:
             accelerator.scaler.load_state_dict(torch_dict["scaler"])
         model.load_state_dict(torch_dict['model'])
         latest_checkpoint = torch_dict['latest_checkpoint']
@@ -276,7 +276,7 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
                                     model=model.module.state_dict() if is_distributed else model.state_dict(),
                                     step=step+1,
                                     latest_checkpoint=latest_checkpoint,
-                                    scaler=accelerator.scaler.state_dict() if config.mixed_precision else None,
+                                    scaler=accelerator.scaler.state_dict() if hasattr(accelerator.scaler) and accelerator.scaler is not None else None,
                                 )
                     torch.save(
                         save_dict,
