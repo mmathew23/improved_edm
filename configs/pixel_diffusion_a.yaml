@@ -1,0 +1,58 @@
+model_name: "improved_edm"
+image_size: 32
+use_ema: True
+train_batch_size: 512
+val_batch_size: 64
+num_train_kimg: 200_000
+gradient_accumulation_steps: 1
+learning_rate: 0.0002 # should be 0.001 according to edm paper
+save_image_steps: 5_000 # total_steps = num_train_kimg * 1000 / train_batch_size / gradient_accumulation_steps
+save_model_steps: 10_000 # total_steps = num_train_kimg * 1000 / train_batch_size / gradient_accumulation_steps
+mixed_precision: "fp16"  # `no` for float32, `fp16` for automatic mixed precision
+output_dir: "results/cifar10"
+seed: 2435723453
+loss_type: 'scaled'
+loss_scaling: 100.0
+training:
+  P_mean: -1.2
+  P_std: 1.2
+  sigma_data: 0.5
+unet:
+  _target_: "model_a.UNet2DModel"
+  sample_size: ${image_size}
+  in_channels: 3
+  out_channels: 3
+  layers_per_block: 3
+  block_out_channels: [256, 256, 256]
+  down_block_types: ["DownBlock2D", "AttnDownBlock2D", "AttnDownBlock2D"]
+  up_block_types: ["AttnUpBlock2D", "AttnUpBlock2D", "UpBlock2D"]
+  dropout: 0.13
+  add_attention: True
+  num_class_embeds: 10
+noise_scheduler:
+  _target_: "diffusers.DDIMScheduler"
+  num_train_timesteps: 1000
+  beta_schedule: "linear"
+optimizer:
+  _target_: "torch.optim.Adam"
+  lr: ${learning_rate}
+  betas: [.9, .999]
+lr_scheduler:
+  # scheduler steps are different that save_image and save_model steps if gradient_accumulation > 0
+  name: 'constant'
+  num_warmup_steps: 19_531
+data:
+  dataset:
+    path: 'cifar10'
+    split: 'train'
+    map:
+      obj:
+        _target_: 'torchvision.transforms.Resize'
+        size: 
+          - ${image_size}
+          - ${image_size}
+      from_key: 'img'
+      to_key: 'image'
+  dataloader:
+    num_workers: 16
+    batch_size: ${train_batch_size}

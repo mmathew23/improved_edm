@@ -10,7 +10,7 @@ from hydra.core.hydra_config import HydraConfig
 from diffusers.optimization import get_constant_schedule_with_warmup, get_cosine_schedule_with_warmup
 from diffusers import EMAModel
 from pipeline import KarrasPipeline
-from accelerate import Accelerator, DistributedDataParallelKwargs
+from accelerate import Accelerator, DistributedDataParallelKwargs, GradScalerKwargs
 from accelerate.utils import LoggerType
 import os
 from tqdm import tqdm
@@ -117,19 +117,25 @@ def replace_grad_nans(model):
 def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_scheduler):
 
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
+    kwargs_handlers = [ddp_kwargs]
+    if config.get('loss_scaling', None) is not None:
+        print(f'Loss scaling: {config.loss_scaling}')
+        # Effectively disable torch grad scaler via enabled=False
+        # we want to control the scaling ourselves
+        kwargs_handlers.append(GradScalerKwargs(init_scale=config.loss_scaling, growth_factor=1.00001, backoff_factor=0.99999, growth_interval=5000, enabled=False))
     assert 'gradient_accumulation_steps' in config and config.gradient_accumulation_steps >= 1
     accelerator = Accelerator(
         mixed_precision=config.mixed_precision,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
         log_with=[LoggerType.TENSORBOARD, 'wandb'],
         project_dir=os.path.join(config.output_dir, "logs"),
-        kwargs_handlers=[ddp_kwargs],
+        kwargs_handlers=kwargs_handlers,
         split_batches=True
     )
     is_distributed = accelerator.num_processes > 1
 
     if config.use_ema:
-        ema = EMAModel(model.parameters(), 0.999, model_cls=type(model), model_config=model.config)
+        ema = EMAModel(model.parameters(), 0.99929, model_cls=type(model), model_config=model.config)
 
     start_step = 0
     latest_checkpoint = -1
@@ -210,16 +216,24 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
 
             loss = F.mse_loss(pred[0], images, reduction="none")
             loss = loss.mean(dim=(1,2,3))
-            scaled_loss = loss_w[:, 0, 0, 0] * loss * loss_scaling
+            scaled_loss = loss_w[:, 0, 0, 0] * loss
             u_sigma = u_sigma[:, 0]
             scaled_loss_mlp = (scaled_loss / u_sigma.exp() + u_sigma)
             if loss_type == 'scaled':
-                accelerator.backward(scaled_loss.mean())
+                accelerator.backward(scaled_loss.mean()*loss_scaling)
             elif loss_type == 'mlp':
-                accelerator.backward(scaled_loss_mlp.mean())
+                accelerator.backward(scaled_loss_mlp.mean()*loss_scaling)
             else:
                 raise NotImplementedError(f'loss_type {loss_type} not supported')
-            replace_grad_nans(model)
+            
+            # in fp16 mode and using accelerates default scaler, replace grad nans is likely bad
+            # if there are nans or infs in grad it will be replaces and the gradscaler will 
+            # eventually keep increasing the scale factor overtime no matter if the grads
+            # are not stable and experience under/overflows. 
+            # either use the default scaler without replace grad nans or custom loss_scaling
+            # constant which will turn off the scaler
+            if hasattr(accelerator, 'scaler') and accelerator.scaler is not None and not accelerator.scaler.is_enabled():
+                replace_grad_nans(model)
             optimizer.step()
             lr_scheduler.step()
             optimizer.zero_grad()
@@ -293,7 +307,7 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
     accelerator.end_training()
 
 
-@hydra.main(version_base=None, config_path="", config_name='pixel_diffusion')
+@hydra.main(version_base=None, config_path="configs", config_name='pixel_diffusion')
 def train(config: DictConfig) -> None:
     assert config.output_dir is not None, "You need to specify an output directory"
 
