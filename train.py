@@ -137,26 +137,6 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
     if config.use_ema:
         ema = EMAModel(model.parameters(), 0.99929, model_cls=type(model), model_config=model.config)
 
-    start_step = 0
-    latest_checkpoint = -1
-    if 'resume' in config and config.resume is not None:
-        print(f"Resuming from {config.resume}")
-        torch_dict = torch.load(config.resume, map_location='cpu')
-        optimizer.load_state_dict(torch_dict['optimizer'])
-        lr_scheduler.load_state_dict(torch_dict['lr_scheduler'])
-        if "scaler" in torch_dict and torch_dict["scaler"] is not None:
-            accelerator.scaler.load_state_dict(torch_dict["scaler"])
-        model.load_state_dict(torch_dict['model'])
-        latest_checkpoint = torch_dict['latest_checkpoint']
-        start_step = torch_dict['step']
-        if config.use_ema:
-            parent_dir = os.path.dirname(config.resume)
-            parent_dir_children = os.listdir(parent_dir)
-            numbers = [int(re.match(r"ema_checkpoints_(\d+)", f).group(1)) for f in parent_dir_children if re.match(r"ema_checkpoints_(\d+)", f)]
-            num = max(numbers)
-            print(f"Using EMA checkpoint {num}")
-            ema.from_pretrained(os.path.join(parent_dir, f'ema_checkpoints_{num}'), model_cls=UNet2DModel)
-
     if accelerator.is_main_process:
         # Create output directory if needed, and asserted for not None in train
         os.makedirs(config.output_dir, exist_ok=True)
@@ -186,6 +166,20 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
     )
+    accelerator.register_for_checkpointing(lr_scheduler)
+    start_step = 0
+    if 'resume' in config and config.resume is not None:
+        print(f"Resuming from {config.resume}")
+        start_step = int(config.resume.split('_')[-1])
+        accelerator.load_state(config.resume)
+        if config.use_ema:
+            parent_dir = os.path.dirname(config.resume)
+            parent_dir_children = os.listdir(parent_dir)
+            numbers = [int(re.match(r"ema_checkpoints_(\d+)", f).group(1)) for f in parent_dir_children if re.match(r"ema_checkpoints_(\d+)", f)]
+            num = max(numbers)
+            print(f"Using EMA checkpoint {num}")
+            ema.from_pretrained(os.path.join(parent_dir, f'ema_checkpoints_{num}'), model_cls=UNet2DModel)
+
     if config.use_ema:
         ema.to(accelerator.device)
 
@@ -196,6 +190,10 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
     train_iter = iter(train_dataloader)
     loss_type = config.loss_type if hasattr(config, 'loss_type') else 'mlp'
     loss_scaling = config.get('loss_scaling', 1.0)
+    if 'loss_scaling' in config and config.loss_scaling is not None:
+        loss_scaling = config.loss_scaling
+    else:
+        loss_scaling = 1.0
     assert loss_type in ['mlp', 'scaled'], 'loss type not supported'
     for step in range(start_step, total_steps):
         batch = next(train_iter)
@@ -230,7 +228,7 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
             # if there are nans or infs in grad it will be replaces and the gradscaler will 
             # eventually keep increasing the scale factor overtime no matter if the grads
             # are not stable and experience under/overflows. 
-            # either use the default scaler without replace grad nans or custom loss_scaling
+            # either use the default scaler without replace grad nans or custom loss_scaling factor
             # constant which will turn off the scaler
             if hasattr(accelerator, 'scaler') and accelerator.scaler is not None and not accelerator.scaler.is_enabled():
                 replace_grad_nans(model)
@@ -282,24 +280,8 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
                         ema.restore(model.parameters())
 
                 if save_model:
-                    latest_checkpoint = step+1
+                    accelerator.save_state(os.path.join(config.output_dir, f"accelerator_{step+1}"))
                     pipeline.save_pretrained(os.path.join(config.output_dir, f"checkpoints_{step+1}"))
-                    save_dict = dict(
-                                    optimizer=optimizer.state_dict(),
-                                    lr_scheduler=lr_scheduler.state_dict(),
-                                    model=model.module.state_dict() if is_distributed else model.state_dict(),
-                                    step=step+1,
-                                    latest_checkpoint=latest_checkpoint,
-                                    scaler=accelerator.scaler.state_dict() if hasattr(accelerator, 'scaler') and accelerator.scaler is not None else None,
-                                )
-                    torch.save(
-                        save_dict,
-                        os.path.join(config.output_dir, f"latest_training_state.pt")
-                    )
-                    torch.save(
-                        save_dict,
-                        os.path.join(config.output_dir, f"training_state_{step+1}.pt")
-                    )
                     if config.use_ema:
                         ema_save_dir = os.path.join(config.output_dir, f"ema_checkpoints_{step+1}")
                         ema.save_pretrained(ema_save_dir)
