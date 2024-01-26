@@ -172,14 +172,17 @@ class GaussianFourierProjection(nn.Module):
 
 
 class ClassEmbedding(nn.Module):
-    def __init__(self, num_classes, embedding_size=512):
+    def __init__(self, num_classes, embedding_size=512, dropout_rate=0.1):
         super().__init__()
 
         self.num_classes = num_classes
         self.linear = Linear(num_classes, embedding_size, bias=False)
+        self.dropout_rate = dropout_rate
 
     def forward(self, class_idx, device, dtype):
         class_embedding = F.one_hot(class_idx, self.num_classes).to(dtype=dtype, device=device)
+        if self.training and self.dropout_rate > 0:
+            class_embedding = (torch.rand(class_embedding.shape[0], 1, device=device) >= self.dropout_rate) * class_embedding
         return self.linear(class_embedding * np.sqrt(self.num_classes))
 
 
@@ -351,7 +354,7 @@ class ResnetBlock2D(nn.Module):
         if temb_channels is not None:
             self.time_emb_proj = linear_cls(temb_channels, out_channels, bias=False)
 
-        self.dropout = torch.nn.Dropout(dropout)
+        self.dropout = torch.nn.Dropout(dropout, inplace=True)
         self.conv2 = conv_cls(out_channels, conv_2d_out_channels, kernel_size=3, stride=1, padding=1, bias=False)
 
         self.nonlinearity = nn.SiLU()
@@ -1082,10 +1085,12 @@ class UNet2DModel(ModelMixin, ConfigMixin):
         norm_eps: float = 1e-4,
         add_attention: bool = True,
         num_class_embeds: Optional[int] = None,
+        num_augmentation_labels: Optional[int] = None,
     ):
         super().__init__()
 
         self.sample_size = sample_size
+        self.num_augmentation_labels = num_augmentation_labels
         time_embed_dim = block_out_channels[0] * 4
 
         # Check inputs
@@ -1115,6 +1120,12 @@ class UNet2DModel(ModelMixin, ConfigMixin):
             self.class_embedding = ClassEmbedding(num_classes=num_class_embeds, embedding_size=time_embed_dim)
         else:
             self.class_embedding = None
+        
+        # augmentation labels
+        if num_augmentation_labels is not None:
+            self.augment_label_embedding = TimestepEmbedding(num_augmentation_labels, timestep_input_dim)
+        else:
+            self.augment_label_embedding = None
 
         self.down_blocks = nn.ModuleList([])
         self.mid_block = None
@@ -1213,6 +1224,7 @@ class UNet2DModel(ModelMixin, ConfigMixin):
         class_labels: Optional[torch.Tensor] = None,
         return_dict: bool = True,
         return_loss_mlp: bool = False,
+        augmentation_labels: Optional[torch.Tensor] = None,
     ) -> Union[UNet2DOutput, Tuple]:
         r"""
         The [`UNet2DModel`] forward method.
@@ -1251,6 +1263,16 @@ class UNet2DModel(ModelMixin, ConfigMixin):
         # but time_embedding might actually be running in fp16. so we need to cast here.
         # there might be better ways to encapsulate this.
         t_emb = t_emb.to(dtype=self.dtype)
+        if self.augment_label_embedding is not None:
+            if self.training and augmentation_labels is None:
+                raise ValueError("augmentation_labels should be provided when doing augmentation conditioning")
+            elif augmentation_labels is None:
+                augmentation_labels = torch.zeros(sample.shape[0], self.num_augmentation_labels, dtype=self.dtype, device=sample.device)
+            augment_emb = self.augment_label_embedding(augmentation_labels.to(device=sample.device)).to(dtype=self.dtype)
+            t_emb = t_emb + augment_emb
+        elif self.augment_label_embedding is None and augmentation_labels is not None:
+            raise ValueError("augment_label_embedding needs to be initialized in order to use augmentation conditioning")
+
         emb = self.time_embedding(t_emb)
 
         if self.class_embedding is not None:

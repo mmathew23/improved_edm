@@ -13,6 +13,9 @@ output_dir: "results/cifar10"
 seed: 2435723453
 loss_type: 'scaled'
 loss_scaling: 100.0
+augmentation: 
+  _target_: "augmentation.KarrasAugmentationPipeline"
+  disable_all: False # set to true to turn off
 training:
   P_mean: -1.2
   P_std: 1.2
@@ -29,6 +32,7 @@ unet:
   dropout: 0.13
   add_attention: True
   num_class_embeds: 10
+  num_augmentation_labels: 9
 noise_scheduler:
   _target_: "diffusers.DDIMScheduler"
   num_train_timesteps: 1000

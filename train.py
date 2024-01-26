@@ -8,7 +8,7 @@ import hydra
 from omegaconf import DictConfig
 from hydra.core.hydra_config import HydraConfig
 from diffusers.optimization import get_constant_schedule_with_warmup, get_cosine_schedule_with_warmup
-from diffusers import EMAModel
+from ema_model import EMAModel
 from pipeline import KarrasPipeline
 from accelerate import Accelerator, DistributedDataParallelKwargs, GradScalerKwargs
 from accelerate.utils import LoggerType
@@ -66,17 +66,23 @@ def get_inverse_sqrt_schedule(optimizer, num_warmup_steps, t_ref):
 
 def evaluate(config, step, pipeline):
     if 'num_class_embeds' in config.unet:
-        labels = torch.arange(config.unet.num_class_embeds, device='cuda:0')[:config.val_batch_size]
+        labels = torch.arange(config.unet.num_class_embeds)[:config.val_batch_size]
         if labels.shape[0] < config.val_batch_size:
             labels = labels.repeat(config.val_batch_size//labels.shape[0] + 1)
             labels = labels[:config.val_batch_size]
     else:
         labels = None
+
+    if hasattr(config, 'augmentation') and config.augmentation is not None:
+        augmentation_labels = torch.zeros(config.val_batch_size, 9)
+    else:
+        augmentation_labels = None
     for i in range(1):
         images = pipeline(
             batch_size=config.val_batch_size,
             class_labels=labels,
             generator=torch.manual_seed(config.seed+i),
+            augmentation_labels=augmentation_labels,
         ).images
 
         cols = math.ceil(np.sqrt(len(images)))
@@ -135,7 +141,7 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
     is_distributed = accelerator.num_processes > 1
 
     if config.use_ema:
-        ema = EMAModel(model.parameters(), 0.99929, model_cls=type(model), model_config=model.config)
+        ema = EMAModel(model.parameters(), [0.05, 0.1], model_cls=type(model), model_config=model.config)
 
     if accelerator.is_main_process:
         # Create output directory if needed, and asserted for not None in train
@@ -173,12 +179,12 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
         start_step = int(config.resume.split('_')[-1])
         accelerator.load_state(config.resume)
         if config.use_ema:
-            parent_dir = os.path.dirname(config.resume)
+            parent_dir = os.path.join(os.path.dirname(config.resume), "ema_checkpoints")
             parent_dir_children = os.listdir(parent_dir)
-            numbers = [int(re.match(r"ema_checkpoints_(\d+)", f).group(1)) for f in parent_dir_children if re.match(r"ema_checkpoints_(\d+)", f)]
+            numbers = [int(f.strip()) for f in parent_dir_children]
             num = max(numbers)
             print(f"Using EMA checkpoint {num}")
-            ema.from_pretrained(os.path.join(parent_dir, f'ema_checkpoints_{num}'), model_cls=UNet2DModel)
+            ema = EMAModel.from_pretrained(parent_dir, model_cls=UNet2DModel, snapshot_t=num)
 
     if config.use_ema:
         ema.to(accelerator.device)
@@ -198,6 +204,11 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
     for step in range(start_step, total_steps):
         batch = next(train_iter)
         images = batch["images"]
+        if isinstance(images, list) or isinstance(images, tuple):
+            # means the augmentation pipeline is turned on and we should handle it
+            images, og_images, augmentation_labels = images
+        else:
+            augmentation_labels = None
         label = None
         if "label" in batch:
             label = batch["label"]
@@ -210,7 +221,7 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
 
         with accelerator.accumulate(model):
             # Predict the noise
-            pred, u_sigma = model(noisy_images, sigma[:, 0, 0, 0], class_labels=label, return_dict=False, return_loss_mlp=True)
+            pred, u_sigma = model(noisy_images, sigma[:, 0, 0, 0], class_labels=label, augmentation_labels=augmentation_labels, return_dict=False, return_loss_mlp=True)
 
             loss = F.mse_loss(pred[0], images, reduction="none")
             loss = loss.mean(dim=(1,2,3))
@@ -273,7 +284,7 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
                 if save_image:
                     if config.use_ema:
                         ema.store(model.parameters())
-                        ema.copy_to(model.parameters())
+                        ema.copy_to(model.parameters(), rel_idx=0)
 
                     evaluate(config, step+1, pipeline)
                     if config.use_ema:
@@ -281,9 +292,8 @@ def train_loop(config, model, noise_scheduler, optimizer, train_dataloader, lr_s
 
                 if save_model:
                     accelerator.save_state(os.path.join(config.output_dir, f"accelerator_{step+1}"))
-                    pipeline.save_pretrained(os.path.join(config.output_dir, f"checkpoints_{step+1}"))
                     if config.use_ema:
-                        ema_save_dir = os.path.join(config.output_dir, f"ema_checkpoints_{step+1}")
+                        ema_save_dir = os.path.join(config.output_dir, f"ema_checkpoints")
                         ema.save_pretrained(ema_save_dir)
 
     accelerator.end_training()
@@ -302,11 +312,14 @@ def train(config: DictConfig) -> None:
         map_transform = hydra.utils.instantiate(config.data.dataset.map.obj)
         map_func = map_wrapper(map_transform, config.data.dataset.map.from_key, config.data.dataset.map.to_key)
         train_dataset = train_dataset.map(map_func)
-    transforms = Compose([
+    transforms = [
         RandomHorizontalFlip(),
-        ToTensor(),
-        Normalize(mean=[0.5]*3, std=[0.5]*3)
-    ])
+    ]
+    if hasattr(config, 'augmentation') and config.augmentation is not None:
+        transforms.append(hydra.utils.instantiate(config.augmentation))
+    else:
+        transforms = transforms + [ToTensor(), Normalize(mean=[0.5]*3, std=[0.5]*3)]
+    transforms = Compose(transforms)
 
     def transform(examples):
         images = [transforms(image.convert("RGB")) for image in examples["image"]]

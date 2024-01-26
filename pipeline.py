@@ -49,6 +49,7 @@ class KarrasPipeline(DiffusionPipeline):
         to_device: Optional[torch.device] = None,
         second_order: bool = True,
         class_labels: Optional[torch.Tensor] = None,
+        augmentation_labels: Optional[torch.Tensor] = None,
     ) -> Union[ImagePipelineOutput, Tuple]:
         # Sample gaussian noise to begin loop
         if isinstance(self.unet.config.sample_size, int):
@@ -87,12 +88,12 @@ class KarrasPipeline(DiffusionPipeline):
             t_hat = torch.as_tensor(t_cur + gamma * t_cur)
             x_hat = image + (t_hat ** 2 - t_cur ** 2).sqrt() * S_noise * torch.randn_like(image)
 
-            denoised = self.unet(x_hat, t_hat, class_labels=class_labels).sample
+            denoised = self.unet(x_hat, t_hat, class_labels=class_labels, augmentation_labels=augmentation_labels).sample
             d_cur = (x_hat - denoised) / t_hat
             image = x_hat + (t_next - t_hat) * d_cur
 
             if second_order and t < num_inference_steps - 1:
-                denoised = self.unet(image, t_next, class_labels=class_labels).sample
+                denoised = self.unet(image, t_next, class_labels=class_labels, augmentation_labels=augmentation_labels).sample
                 d_prime = (image - denoised) / t_next
                 image = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 
