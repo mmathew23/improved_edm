@@ -4,11 +4,36 @@ import contextlib
 import copy
 import numpy as np
 import os
+from functools import wraps
+from diffusers import logging
 
 
-class PostHocEMASolver:
-    def __init__():
-        pass
+logger = logging.get_logger("diffusers")
+
+
+class DiffusersHideWarnings:
+    log_level = logger.level
+
+    @classmethod
+    def hide_warnings(cls):
+        logging.set_verbosity_error()
+
+    @classmethod
+    def restore_warnings(cls):
+        logging.set_verbosity(cls.log_level)
+
+
+def hide_diffusers_warnings(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        # Hide warnings before calling the function
+        DiffusersHideWarnings.hide_warnings()
+        try:
+            return func(*args, **kwargs)
+        finally:
+            # Restore warnings after the function call
+            DiffusersHideWarnings.restore_warnings()
+    return wrapper
 
 
 # Adapted from https://github.com/huggingface/diffusers/blob/main/src/diffusers/training_utils.py
@@ -84,6 +109,7 @@ class EMAModel:
         return X
 
     @classmethod
+    @hide_diffusers_warnings
     def from_pretrained(cls, path, model_cls, snapshot_t: Optional[int] = None) -> "EMAModel":
         if snapshot_t is None or snapshot_t <= 0:
             snapshot_t = str(max(map(int, os.listdir(path)))) # should be a list of ints as strings
@@ -98,6 +124,7 @@ class EMAModel:
             model = model_cls.from_pretrained(path + f'/sigma_rel_{i}')
             ema_model.shadow_params.append([])
             ema_model.shadow_params[i] = [p.clone().detach() for p in model.parameters()]
+
         return ema_model
 
     def save_pretrained(self, path):
@@ -176,6 +203,7 @@ class EMAModel:
         for s_param, param in zip(self.shadow_params[rel_idx], parameters):
             param.data.copy_(s_param.to(param.device).data)
 
+    @hide_diffusers_warnings
     def copy_ema_profile(self, parameters: Iterable[torch.nn.Parameter], target_sigma_rel: float, target_t: float, ema_checkpoint_path: str) -> None:
         """
         Calculate a specific ema profile and copy paramters
@@ -190,6 +218,7 @@ class EMAModel:
 
         assert self.model_cls is not None
         assert self.model_config is not None
+
         parameters = list(parameters)
         for p in parameters:
             p.data.zero_()

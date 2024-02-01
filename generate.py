@@ -15,15 +15,12 @@ def main(
         tile_size: int = 4,
         seed: int = 24357234501,
         eta: float = 0.0,
-        ema_unet_path: str = None,
         class_labels: int = None,
+        unconditional: bool = False,
 ):
     print(f'checkpoint {checkpoint}')
     print(f'num samples {num_samples}')
     print(f'device {device}')
-    if class_labels:
-        print(f'class labels {class_labels}')
-        class_labels = torch.randint(0, class_labels, (num_samples,))
 
     # get checkpoint last folder
     checkpoint = checkpoint[:-1] if checkpoint[-1] == '/' else checkpoint
@@ -33,10 +30,15 @@ def main(
     print(f'Saving in {save_dir}')
 
     pipeline = KarrasPipeline.from_pretrained(checkpoint)
-    if ema_unet_path is not None:
-        ema_unet = UNet2DModel.from_pretrained(ema_unet_path)
-        pipeline.unet = ema_unet
     pipeline.to(device)
+
+    if class_labels and not unconditional:
+        print(f'class labels {class_labels}')
+        class_labels = torch.randint(0, class_labels, (num_samples,))
+    elif class_labels and unconditional:
+        class_labels = -torch.ones((num_samples,), dtype=torch.long)
+    else:
+        assert pipeline.unet.num_class_embeds is None, 'Model has class embeddings, but no class labels were provided. For conditional sampling set class_labels > 0. For unconditional sampling, in this case set class_labels > 0 and unconditional=True'
     images = pipeline(
         batch_size=num_samples,
         num_inference_steps=num_inference_steps,
@@ -50,8 +52,6 @@ def main(
 
     os.makedirs(f'{save_dir}', exist_ok=True)
     prefix = 'sample_'
-    if ema_unet_path is not None:
-        prefix = 'ema_sample_'
     for i, start in enumerate(range(0, len(images), tile_size*tile_size)):
         save_image(images[start:start+tile_size*tile_size], f'{save_dir}/{prefix}{i}.png', nrow=tile_size)
 

@@ -179,8 +179,7 @@ class ClassEmbedding(nn.Module):
         self.linear = Linear(num_classes, embedding_size, bias=False)
         self.dropout_rate = dropout_rate
 
-    def forward(self, class_idx, device, dtype):
-        class_embedding = F.one_hot(class_idx, self.num_classes).to(dtype=dtype, device=device)
+    def forward(self, class_embedding, device):
         if self.training and self.dropout_rate > 0:
             class_embedding = (torch.rand(class_embedding.shape[0], 1, device=device) >= self.dropout_rate) * class_embedding
         return self.linear(class_embedding * np.sqrt(self.num_classes))
@@ -1118,6 +1117,7 @@ class UNet2DModel(ModelMixin, ConfigMixin):
         # class embedding
         if num_class_embeds is not None:
             self.class_embedding = ClassEmbedding(num_classes=num_class_embeds, embedding_size=time_embed_dim)
+            self.num_class_embeds = num_class_embeds
         else:
             self.class_embedding = None
         
@@ -1279,7 +1279,14 @@ class UNet2DModel(ModelMixin, ConfigMixin):
             if class_labels is None:
                 raise ValueError("class_labels should be provided when doing class conditioning")
 
-            class_emb = self.class_embedding(class_labels, sample.device, self.dtype).to(dtype=self.dtype)
+            unconditional_indices = class_labels == -1
+            if unconditional_indices.any():
+                class_labels = torch.where(unconditional_indices, 0, class_labels)
+            class_embedding = F.one_hot(class_labels, self.num_class_embeds).to(dtype=self.dtype, device=sample.device)
+            if unconditional_indices.any():
+                # after setting the -1 idx to 0, we need to set the corresponding class_embedding to 0
+                class_embedding[unconditional_indices] = 0
+            class_emb = self.class_embedding(class_embedding, sample.device)
             emb = emb + class_emb
         elif self.class_embedding is None and class_labels is not None:
             raise ValueError("class_embedding needs to be initialized in order to use class conditioning")

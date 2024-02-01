@@ -11,16 +11,17 @@ from typing import List, Optional
 
 def main(
     ema_checkpoint_path: str,
-    target_sigma_rels: List[float] = [0.05, 0.75, 0.1],
+    target_sigma_rels: List[float] = [0.05, 0.075, 0.1],
     snapshot_t: Optional[int] = None,
 ):
     ema_model = EMAModel.from_pretrained(ema_checkpoint_path, model_cls=UNet2DModel)
     unet = ema_model.model_cls.from_config(ema_model.model_config)
-    save_base_path = os.path.join(os.path.dirname(ema_checkpoint_path), 'posthoc_ema_checkpoints')
-    os.makedirs(save_base_path, exist_ok=True)
 
     if snapshot_t is None:
         snapshot_t = ema_model.snapshot_t[-1]
+        print(f'Using snapshot t={snapshot_t}')
+    save_base_path = os.path.join(os.path.dirname(ema_checkpoint_path), f'posthoc_ema_checkpoints_{snapshot_t}')
+    os.makedirs(save_base_path, exist_ok=True)
 
     for target_sigma in target_sigma_rels:
         ema_model.copy_ema_profile(unet.parameters(), target_sigma, snapshot_t, ema_checkpoint_path)

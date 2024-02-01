@@ -29,7 +29,7 @@ unet:
   block_out_channels: [256, 256, 256]
   down_block_types: ["DownBlock2D", "AttnDownBlock2D", "AttnDownBlock2D"]
   up_block_types: ["AttnUpBlock2D", "AttnUpBlock2D", "UpBlock2D"]
-  dropout: 0.13
+  dropout: 0.10
   add_attention: True
   num_class_embeds: 10
   num_augmentation_labels: 9

@@ -312,13 +312,10 @@ def train(config: DictConfig) -> None:
         map_transform = hydra.utils.instantiate(config.data.dataset.map.obj)
         map_func = map_wrapper(map_transform, config.data.dataset.map.from_key, config.data.dataset.map.to_key)
         train_dataset = train_dataset.map(map_func)
-    transforms = [
-        RandomHorizontalFlip(),
-    ]
     if hasattr(config, 'augmentation') and config.augmentation is not None:
-        transforms.append(hydra.utils.instantiate(config.augmentation))
+        transforms = [hydra.utils.instantiate(config.augmentation)]
     else:
-        transforms = transforms + [ToTensor(), Normalize(mean=[0.5]*3, std=[0.5]*3)]
+        transforms = [RandomHorizontalFlip(), ToTensor(), Normalize(mean=[0.5]*3, std=[0.5]*3)]
     transforms = Compose(transforms)
 
     def transform(examples):
